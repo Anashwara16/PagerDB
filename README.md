@@ -1,1 +1,1 @@
-A learning B+ tree based key–value storage engine in C++ (paging, buffer pool, WAL, recovery).
+Building PagerDB, a file-backed key-value store / mini storage engine in modern C++. Implementing a page-oriented on-disk format (fixed 4KB pages + a meta page) with POSIX pread/pwrite and explicit sync points for durability boundaries. Developing a B+ tree for Get/Put (including splits) and a Status-based error model (no exceptions). 
