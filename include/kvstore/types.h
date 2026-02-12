@@ -26,8 +26,8 @@
 #pragma once  // Modern include guard - prevents double inclusion
 
 #include <cstdint>   // For fixed-width integers: uint8_t, uint16_t, uint32_t, uint64_t
-#include <cstddef>   // For size_t
-#include <limits>    // For std::numeric_limits - gives us max/min values for any type
+#include <cstddef>  // For size_t
+#include <limits>  // For std::numeric_limits - gives us max/min values for any type
 
 namespace kvstore {
 
@@ -68,7 +68,7 @@ static_assert(sizeof(PageId) == 4, "PageId must be 4 bytes");
 //   - Page 0 is valid (it's our metadata page)
 //   - Max value is obviously "special" and easy to spot in debugging
 //   - Common convention in systems programming
-inline constexpr PageId kInvalidPageId = std::numeric_limits<PageId>::max();
+constexpr PageId kInvalidPageId = std::numeric_limits<PageId>::max();
 
 // ==============================================================================
 // Log Sequence Number (LSN)
@@ -94,8 +94,8 @@ static_assert(sizeof(Lsn) == 8, "Lsn must be 8 bytes");
 
 // Starting LSN value - log sequence numbers begin at 1
 // Zero is reserved to mean "no LSN" or "page has never been modified"
-inline constexpr Lsn kInvalidLsn = 0;
-inline constexpr Lsn kFirstLsn = 1;
+constexpr Lsn kInvalidLsn = 0;
+constexpr Lsn kFirstLsn = 1;
 
 // ==============================================================================
 // Transaction Identifier (TxId)
@@ -113,7 +113,7 @@ using TxId = std::uint64_t;
 static_assert(sizeof(TxId) == 8, "TxId must be 8 bytes");
 
 // Special values for transactions
-inline constexpr TxId kInvalidTxId = 0;
+constexpr TxId kInvalidTxId = 0;
 
 // ==============================================================================
 // Slot Index
@@ -128,7 +128,7 @@ using SlotId = std::uint16_t;
 static_assert(sizeof(SlotId) == 2, "SlotId must be 2 bytes");
 
 // Maximum meaningful slot ID (used for bounds checking)
-inline constexpr SlotId kInvalidSlotId = std::numeric_limits<SlotId>::max();
+constexpr SlotId kInvalidSlotId = std::numeric_limits<SlotId>::max();
 
 // ==============================================================================
 // Size Types

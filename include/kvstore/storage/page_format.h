@@ -271,23 +271,6 @@ static_assert(sizeof(SlotEntry) == 8, "SlotEntry must be exactly 8 bytes");
 class Page {
 public:
     // -------------------------------------------------------------------------
-    // Construction
-    // -------------------------------------------------------------------------
-    
-    // Default constructor - creates an uninitialized page
-    // You must call Init() before using
-    Page() = default;
-    
-    // Initialize this page with given ID and type
-    void Init(PageId id, PageType type) {
-        // Zero the entire page first
-        std::memset(data_, 0, kPageSize);
-        
-        // Initialize the header
-        header()->Init(id, type);
-    }
-    
-    // -------------------------------------------------------------------------
     // Header Access (C++23: Deducing This)
     // -------------------------------------------------------------------------
     //
@@ -304,6 +287,9 @@ public:
     //
     // The 'this auto&& self' parameter captures the object with its
     // const-ness, so calling on a const Page returns const PageHeader*.
+    //
+    // NOTE: Functions with deduced return types must be defined before use,
+    // so header() is placed before Init() which calls it.
     
     [[nodiscard]] auto header(this auto&& self) noexcept
         -> decltype(auto)
@@ -314,6 +300,23 @@ public:
         } else {
             return reinterpret_cast<PageHeader*>(self.data_);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Construction
+    // -------------------------------------------------------------------------
+    
+    // Default constructor - creates an uninitialized page
+    // You must call Init() before using
+    Page() = default;
+    
+    // Initialize this page with given ID and type
+    void Init(PageId id, PageType type) {
+        // Zero the entire page first
+        std::memset(data_, 0, kPageSize);
+        
+        // Initialize the header
+        header()->Init(id, type);
     }
     
     // Convenience accessors
@@ -343,10 +346,9 @@ public:
     [[nodiscard]] auto slot(this auto&& self, SlotId index) noexcept
         -> decltype(auto)
     {
-        // C++23: [[assume]] tells the compiler this condition is always true
-        // This enables better optimizations (no bounds-check code generated)
-        [[assume(index < self.header()->num_slots)]];
-        
+        // Note: [[assume(index < self.header()->num_slots)]] could be used here
+        // for optimization hints, but Clang 18 doesn't fully support it yet.
+        // The caller is responsible for bounds checking.
         return self.slots()[index];
     }
     

@@ -1,0 +1,17 @@
+# Build files
+build/
+*.o
+*.out
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# VSCode
+.vscode/
+
+# C++
+*.exe
+*.class

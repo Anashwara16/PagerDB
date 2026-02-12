@@ -34,7 +34,8 @@ project(kvstore
 # ------------------------------------------------------------------------------
 # C++ Standard Configuration
 # ------------------------------------------------------------------------------
-# We require C++20 for:
+# We require C++23 for:
+#   - std::expected (modern error handling)
 #   - std::span (safe array views)
 #   - std::string_view improvements
 #   - Concepts (for cleaner template constraints, optional)
@@ -42,13 +43,19 @@ project(kvstore
 #   - Designated initializers
 #   - Three-way comparison operator (<=>)
 #
-# CMAKE_CXX_STANDARD_REQUIRED ensures the build fails if C++20 isn't available
+# CMAKE_CXX_STANDARD_REQUIRED ensures the build fails if C++23 isn't available
 # CMAKE_CXX_EXTENSIONS=OFF disables compiler-specific extensions (like GNU++)
 # for better portability
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Use libc++ with Clang for full C++23 support (std::expected, deducing this)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++)
+endif()
 
 # ------------------------------------------------------------------------------
 # Compiler Warnings
@@ -229,3 +236,10 @@ message(STATUS "  Build Type:   ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Source Dir:   ${CMAKE_SOURCE_DIR}")
 message(STATUS "  Binary Dir:   ${CMAKE_BINARY_DIR}")
 message(STATUS "")
+
+
+# ------------------------------------------------------------------------------
+# Main Executable (for manual testing)
+# ------------------------------------------------------------------------------
+add_executable(kvstore_test src/main.cc)
+target_link_libraries(kvstore_test kvstore_lib)
