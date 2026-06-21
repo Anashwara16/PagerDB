@@ -1,137 +1,71 @@
 // ==============================================================================
-// kvstore/status.h - Error Handling (C++23 Version)
+// kvstore/status.h
 // ==============================================================================
 //
-// This file defines our error handling strategy. In database systems, many
-// operations can fail (disk full, file not found, corruption detected, etc.),
-// so we need a consistent way to report errors.
+// Defines the kvstore error/result model.
 //
-// Design Choices:
-// ---------------
+// APIs that can fail return Status for operations without a value, or Result<T>
+// for operations that produce a value. StatusCode identifies the error category;
+// Status::message() carries operation-specific diagnostic text for logs and
+// debugging.
 //
-// Why not use exceptions?
-//   Exceptions are controversial in systems programming because:
-//   1. They have runtime overhead (even when not thrown)
-//   2. They can be hard to reason about (any function might throw)
-//   3. Many codebases (Google, LLVM, game engines) avoid them
-//   4. Error handling is explicit with Status - you can't ignore it
-//
-// Why std::expected (C++23)?
-//   C++23 introduced std::expected<T, E>, which is exactly what we need!
-//   It's a standard way to return either a value OR an error. Think of it
-//   like a box that contains either your result or an error message.
-//   
-//   We no longer need our custom Result<T> template - the standard library
-//   now provides this functionality, which means:
-//   - Better compiler support and optimizations
-//   - Familiar API for other C++ developers  
-//   - Interoperability with other libraries
-//
-// The Pattern:
-//   Status DoSomething() {
-//       if (error_condition) {
-//           return Status(StatusCode::kIoError, "disk full");
-//       }
-//       return Status::Ok();
-//   }
-//
-//   // Caller:
-//   Status s = DoSomething();
-//   if (!s.ok()) {
-//       std::cerr << "Error: " << s.message() << std::endl;
-//       return s;  // Propagate error
-//   }
-//
-// For functions returning values:
-//   std::expected<int, Status> ParseNumber(std::string_view s) {
-//       if (s.empty()) {
-//           return std::unexpected(Status::InvalidArgument("empty string"));
-//       }
-//       return std::stoi(std::string(s));
-//   }
+// The storage engine reports errors explicitly instead of throwing exceptions.
+// Callers are expected to check returned Status and Result<T> values and
+// propagate failures with the original Status when possible.
 //
 // ==============================================================================
 
 #pragma once
 
-#include <expected>      // C++23: std::expected, std::unexpected
+#include <expected>
 #include <string>
 #include <string_view>
-#include <utility>       // For std::move
+#include <utility>
 
 namespace kvstore {
 
-// ==============================================================================
-// Status Codes
-// ==============================================================================
-//
-// These are the categories of errors that can occur. Keep this list small
-// and general - specific details go in the message string.
-
+// Broad error categories. Operation-specific details belong in Status::message().
 enum class StatusCode {
-    // Success - operation completed normally
+    // Operation completed successfully.
     kOk,
 
-    // The requested key was not found in the database
+    // Requested key, page, file, or record does not exist.
     kNotFound,
 
-    // A disk I/O operation failed (read, write, sync, etc.)
+    // Filesystem or device operation failed.
     kIoError,
 
-    // Data on disk doesn't match expected format or checksum
+    // Persisted data failed validation or decoding.
     kCorruption,
 
-    // The caller provided invalid arguments
+    // Caller supplied invalid input.
     kInvalidArgument,
 
-    // Resource is temporarily unavailable (e.g., locked by another operation)
+    // Resource is temporarily unavailable.
     kBusy,
 
-    // An internal logic error - indicates a bug in our code
+    // Internal invariant violation.
     kInternal,
 
-    // Operation would exceed a limit (e.g., page full, no free pages)
+    // Operation cannot proceed due to capacity limits.
     kNoSpace,
 };
 
-// ==============================================================================
-// Status Class
-// ==============================================================================
+// Lightweight value type used to report operation success or failure.
 //
-// Status combines a code with an optional message. The message provides
-// human-readable details for debugging.
-//
-// Usage:
-//   Status s = Status::IoError("write failed: disk full");
-//   if (!s.ok()) {
-//       LOG << s.message();  // "write failed: disk full"
-//   }
-
+// A default-constructed Status is successful. Error statuses carry a non-kOk
+// StatusCode and may include diagnostic text suitable for logs.
 class Status {
 public:
-    // -------------------------------------------------------------------------
-    // Construction
-    // -------------------------------------------------------------------------
-
-    // Default constructor creates an "Ok" status
-    // This is intentional - success should be easy, errors require explanation
     Status() = default;
 
-    // Construct with code and message
     Status(StatusCode code, std::string msg)
         : code_(code), msg_(std::move(msg)) {}
 
-    // -------------------------------------------------------------------------
-    // Static Factory Methods
-    // -------------------------------------------------------------------------
-    // These provide a cleaner API than raw constructors
-
-    // Success status
-    static Status Ok() { 
-        return Status(); 
+    static Status Ok() {
+        return Status();
     }
 
-    // Common error types with message
     static Status NotFound(std::string_view msg) {
         return Status(StatusCode::kNotFound, std::string(msg));
     }
@@ -160,35 +94,23 @@ public:
         return Status(StatusCode::kNoSpace, std::string(msg));
     }
 
-    // -------------------------------------------------------------------------
-    // Accessors
-    // -------------------------------------------------------------------------
-
-    // Returns true if this status represents success
-    [[nodiscard]] bool ok() const { 
-        return code_ == StatusCode::kOk; 
+    [[nodiscard]] bool ok() const {
+        return code_ == StatusCode::kOk;
     }
 
-    // Returns the error code
-    [[nodiscard]] StatusCode code() const { 
-        return code_; 
+    [[nodiscard]] StatusCode code() const {
+        return code_;
     }
 
-    // Returns the error message (empty for Ok status)
-    [[nodiscard]] std::string_view message() const { 
-        return msg_; 
+    [[nodiscard]] std::string_view message() const {
+        return msg_;
     }
 
-    // -------------------------------------------------------------------------
-    // String Conversion
-    // -------------------------------------------------------------------------
-
-    // Returns a human-readable representation
     [[nodiscard]] std::string ToString() const {
         if (ok()) {
             return "Ok";
         }
-        
+
         std::string result;
         switch (code_) {
             case StatusCode::kOk:              result = "Ok"; break;
@@ -200,12 +122,12 @@ public:
             case StatusCode::kInternal:        result = "Internal"; break;
             case StatusCode::kNoSpace:         result = "NoSpace"; break;
         }
-        
+
         if (!msg_.empty()) {
             result += ": ";
             result += msg_;
         }
-        
+
         return result;
     }
 
@@ -214,63 +136,16 @@ private:
     std::string msg_;
 };
 
-// ==============================================================================
-// Result<T> Type Alias - Using std::expected (C++23)
-// ==============================================================================
-//
-// In C++23, we can use std::expected<T, E> from the standard library instead
-// of writing our own Result<T> template. This is a huge improvement!
-//
-// std::expected<T, Status> works like this:
-//   - It holds either a value of type T (the "expected" case)
-//   - OR an error of type Status (the "unexpected" case)
-//
-// Key differences from our old custom Result<T>:
-//   - Use std::unexpected(status) to create an error result
-//   - Use .has_value() or implicit bool conversion to check success
-//   - Use .value() to get the value (throws if error!)
-//   - Use .error() to get the Status when there's an error
-//   - Use .value_or(default) to get value or a default on error
-//
-// Example - Returning success:
-//   Result<int> GetAge() {
-//       return 25;  // Just return the value directly
-//   }
-//
-// Example - Returning an error:
-//   Result<int> GetAge() {
-//       return std::unexpected(Status::NotFound("age not set"));
-//   }
-//
-// Example - Using a Result:
-//   auto result = GetAge();
-//   if (result) {  // or: if (result.has_value())
-//       std::cout << "Age: " << *result << std::endl;  // or: result.value()
-//   } else {
-//       std::cout << "Error: " << result.error().message() << std::endl;
-//   }
-
+// Result type for operations that either produce T or fail with Status.
 template <typename T>
 using Result = std::expected<T, Status>;
 
-// ==============================================================================
-// Helper Function for Creating Error Results
-// ==============================================================================
-//
-// Since std::unexpected requires wrapping the error, we provide helper 
-// functions to make error creation more readable.
-//
-// Instead of:  return std::unexpected(Status::NotFound("key missing"));
-// You can use: return Err(Status::NotFound("key missing"));
-//
-// Or even shorter factory functions below.
-
+// Wraps a Status in std::unexpected for returning Result<T> failures.
 template <typename T>
 [[nodiscard]] std::unexpected<Status> Err(Status s) {
     return std::unexpected(std::move(s));
 }
 
-// Convenience: Create unexpected results directly from error types
 [[nodiscard]] inline std::unexpected<Status> ErrNotFound(std::string_view msg) {
     return std::unexpected(Status::NotFound(msg));
 }
