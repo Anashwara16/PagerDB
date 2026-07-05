@@ -19,6 +19,7 @@
 #include "kvstore/storage/page_format.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <ranges>
 #include <bit>

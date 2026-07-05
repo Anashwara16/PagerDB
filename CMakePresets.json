@@ -1,0 +1,76 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "KVSTORE_BUILD_TESTS": "ON"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "KVSTORE_BUILD_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "asan",
+            "displayName": "Debug + ASan/UBSan",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "KVSTORE_SANITIZER": "address,undefined"
+            }
+        },
+        {
+            "name": "tsan",
+            "displayName": "Debug + TSan (used from Phase 5 on)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "KVSTORE_SANITIZER": "thread"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug", "configurePreset": "debug" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "asan", "configurePreset": "asan" },
+        { "name": "tsan", "configurePreset": "tsan" }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

@@ -276,10 +276,18 @@ FileStatus PosixFile::Sync() {
     //   - File size changes are flushed (needed to read data back)
     //   - Access/modification times may not be flushed (we don't care)
     
+    // macOS has no fdatasync(); fsync() is the portable equivalent there.
+    // (F_FULLFSYNC for true power-loss durability is a Phase 4 concern.)
+#if defined(__APPLE__)
+    if (::fsync(fd_) < 0) {
+        return IoErrorFromErrno("Sync failed", path_);
+    }
+#else
     if (::fdatasync(fd_) < 0) {
         return IoErrorFromErrno("Sync failed", path_);
     }
-    
+#endif
+
     return {};
 }
 

@@ -1,0 +1,26 @@
+# Phase 0 baseline: bugprone + readability, tuned to the existing codebase.
+# Suppressions:
+#   readability-identifier-length   : short names (i, k, v, fd) are idiomatic here
+#   readability-magic-numbers       : page-format offsets/sizes are spec'd in comments
+#   readability-function-cognitive-complexity : B+ tree split paths trip this by design
+#   bugprone-easily-swappable-parameters      : (offset, size) I/O signatures are POSIX-shaped
+Checks: >
+  bugprone-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-convert-member-functions-to-static
+
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/kvstore/.*'
+FormatStyle: file
+
+CheckOptions:
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.FunctionCase: CamelCase
+  readability-identifier-naming.PrivateMemberSuffix: '_'
+  readability-identifier-naming.ConstexprVariablePrefix: 'k'
+  readability-identifier-naming.ConstexprVariableCase: CamelCase

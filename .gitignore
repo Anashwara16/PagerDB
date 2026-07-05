@@ -15,3 +15,8 @@ build/
 # C++
 *.exe
 *.class
+# clangd index cache
+.cache/
+
+# In-source CMake artifacts (legacy)
+CMakeFiles/
