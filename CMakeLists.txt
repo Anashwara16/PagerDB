@@ -18,7 +18,8 @@
 #
 # ==============================================================================
 
-cmake_minimum_required(VERSION 3.16)
+# 3.21+ needed for CMakePresets.json schema version 3 (see CMakePresets.json)
+cmake_minimum_required(VERSION 3.21)
 
 # ------------------------------------------------------------------------------
 # Project Definition
@@ -98,6 +99,23 @@ endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 # ------------------------------------------------------------------------------
+# Sanitizers
+# ------------------------------------------------------------------------------
+# KVSTORE_SANITIZER selects compiler sanitizers, e.g.:
+#   -DKVSTORE_SANITIZER=address,undefined   (the 'asan' preset)
+#   -DKVSTORE_SANITIZER=thread              (the 'tsan' preset)
+# Empty (default) means no sanitizer. Applied globally so the library, tests,
+# and fetched dependencies are all instrumented consistently.
+
+set(KVSTORE_SANITIZER "" CACHE STRING "Sanitizer list for -fsanitize= (empty = none)")
+
+if(KVSTORE_SANITIZER)
+    message(STATUS "Sanitizers enabled: ${KVSTORE_SANITIZER}")
+    add_compile_options(-fsanitize=${KVSTORE_SANITIZER} -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${KVSTORE_SANITIZER})
+endif()
+
+# ------------------------------------------------------------------------------
 # Include Directories
 # ------------------------------------------------------------------------------
 # This tells the compiler where to find header files when you write:
@@ -122,8 +140,14 @@ set(KVSTORE_SOURCES
     src/storage/file.cc
     src/storage/page.cc
     src/storage/pager.cc
+    src/storage/buffer_pool.cc
     src/btree/node.cc
     src/btree/btree.cc
+    src/btree/cursor.cc
+    src/wal/log_record.cc
+    src/wal/log_writer.cc
+    src/wal/log_reader.cc
+    src/txn/lock_manager.cc
     src/db.cc
     # src/storage/buffer_pool.cc
     # src/btree/btree.cc
@@ -202,28 +226,89 @@ if(KVSTORE_BUILD_TESTS)
     #   1. Failures are easier to isolate
     #   2. Tests can run in parallel
     #   3. You can run individual test executables directly
-    
-    # Test for basic types and status
-    add_executable(types_test tests/types_test.cc)
-    target_link_libraries(types_test kvstore_lib GTest::gtest_main)
-    add_test(NAME types_test COMMAND types_test)
-    
-    # Test for file operations
-    add_executable(file_test tests/file_test.cc)
-    target_link_libraries(file_test kvstore_lib GTest::gtest_main)
-    add_test(NAME file_test COMMAND file_test)
-    
-    # Test for page operations
-    add_executable(page_test tests/page_test.cc)
-    target_link_libraries(page_test kvstore_lib GTest::gtest_main)
-    add_test(NAME page_test COMMAND page_test)
-    
-    # Add more tests as you implement more modules:
-    # add_executable(buffer_pool_test tests/buffer_pool_test.cc)
-    # target_link_libraries(buffer_pool_test kvstore_lib GTest::gtest_main)
-    # add_test(NAME buffer_pool_test COMMAND buffer_pool_test)
+    #
+    # To add a test: create tests/<name>.cc and append <name> here.
+
+    set(KVSTORE_TESTS
+        types_test
+        file_test
+        page_test
+        pager_test
+        buffer_pool_test
+        buffer_pool_concurrent_test
+        wal_test
+        recovery_test
+        crash_test
+        node_test
+        btree_test
+        cursor_test
+        btree_property_test
+        btree_concurrent_test
+        db_test
+        db_concurrent_test
+        txn_test
+    )
+
+    foreach(test_name IN LISTS KVSTORE_TESTS)
+        add_executable(${test_name} tests/${test_name}.cc)
+        target_link_libraries(${test_name} kvstore_lib GTest::gtest_main)
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
 else()
     message(STATUS "Building tests is disabled. Use -DKVSTORE_BUILD_TESTS=ON to enable.")
+endif()
+
+# ------------------------------------------------------------------------------
+# Benchmarks with Google Benchmark (Optional, Phase 6)
+# ------------------------------------------------------------------------------
+# Set KVSTORE_BUILD_BENCH=ON (the 'bench' preset: Release + benchmarks) to
+# build bench/db_bench and, when a system sqlite3 is available, the
+# bench/sqlite_bench baseline. One-command run: tools/run_bench.sh.
+
+option(KVSTORE_BUILD_BENCH "Build the benchmark suite" OFF)
+
+if(KVSTORE_BUILD_BENCH)
+    message(STATUS "Building benchmarks is enabled")
+
+    find_package(benchmark QUIET)
+
+    if(NOT benchmark_FOUND)
+        message(STATUS "Google Benchmark not found locally, fetching from GitHub...")
+        include(FetchContent)
+
+        # Don't build benchmark's own tests, and don't let its -Werror trip
+        # on our globally applied warning flags.
+        set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+        FetchContent_Declare(
+            googlebenchmark
+            GIT_REPOSITORY https://github.com/google/benchmark.git
+            GIT_TAG        v1.9.1  # Pinned for reproducibility
+        )
+        FetchContent_MakeAvailable(googlebenchmark)
+    endif()
+
+    add_executable(db_bench bench/db_bench.cc)
+    target_link_libraries(db_bench kvstore_lib benchmark::benchmark)
+
+    # SQLite baseline (docs/BENCHMARKS.md). Uses the system library; the
+    # target simply doesn't exist where sqlite3 isn't installed.
+    find_library(KVSTORE_SQLITE3_LIB sqlite3)
+    find_path(KVSTORE_SQLITE3_INCLUDE sqlite3.h)
+    if(KVSTORE_SQLITE3_LIB AND KVSTORE_SQLITE3_INCLUDE)
+        message(STATUS "SQLite3 found: ${KVSTORE_SQLITE3_LIB} - building sqlite_bench")
+        add_executable(sqlite_bench bench/sqlite_bench.cc)
+        target_include_directories(sqlite_bench PRIVATE ${KVSTORE_SQLITE3_INCLUDE})
+        target_link_libraries(sqlite_bench benchmark::benchmark ${KVSTORE_SQLITE3_LIB})
+        # bench_util.h lives in bench/
+        target_include_directories(sqlite_bench PRIVATE ${CMAKE_SOURCE_DIR}/bench)
+    else()
+        message(STATUS "SQLite3 not found - skipping sqlite_bench baseline")
+    endif()
+    target_include_directories(db_bench PRIVATE ${CMAKE_SOURCE_DIR}/bench)
 endif()
 
 # ------------------------------------------------------------------------------
@@ -239,7 +324,15 @@ message(STATUS "")
 
 
 # ------------------------------------------------------------------------------
-# Main Executable (for manual testing)
+# Demo Executable (for manual testing)
 # ------------------------------------------------------------------------------
-add_executable(kvstore_test src/main.cc)
-target_link_libraries(kvstore_test kvstore_lib)
+# Named kvstore_demo so the kvstore_test name stays free for test binaries.
+add_executable(kvstore_demo src/main.cc)
+target_link_libraries(kvstore_demo kvstore_lib)
+
+# ------------------------------------------------------------------------------
+# Inspector Tool
+# ------------------------------------------------------------------------------
+# Read-only on-disk inspector: meta dump, tree structure, leaf-chain check.
+add_executable(kvstore_inspect tools/kvstore_inspect.cc)
+target_link_libraries(kvstore_inspect kvstore_lib)
