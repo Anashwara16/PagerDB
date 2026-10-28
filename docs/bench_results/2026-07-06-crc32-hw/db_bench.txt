@@ -1,0 +1,43 @@
+-------------------------------------------------------------------------------------
+Benchmark                           Time             CPU   Iterations UserCounters...
+-------------------------------------------------------------------------------------
+BM_SeqLoad/100000_mean           1048 ms          952 ms            3 items_per_second=105.531k/s max_us=13.7787k p50_us=2.375 p99_us=102.125
+BM_SeqLoad/100000_median         1027 ms          927 ms            3 items_per_second=107.869k/s max_us=11.7779k p50_us=2.375 p99_us=102.541
+BM_SeqLoad/100000_stddev          107 ms         79.1 ms            3 items_per_second=8.48852k/s max_us=4.31837k p50_us=0 p99_us=6.96732
+BM_SeqLoad/100000_cv            10.23 %          8.31 %             3 items_per_second=8.04% max_us=31.34% p50_us=0.00% p99_us=6.82%
+BM_RandLoad/100000_mean          1822 ms         1348 ms            3 items_per_second=74.1628k/s max_us=23.3283k p50_us=4 p99_us=95.264
+BM_RandLoad/100000_median        1834 ms         1347 ms            3 items_per_second=74.2641k/s max_us=21.187k p50_us=4 p99_us=94.625
+BM_RandLoad/100000_stddev        45.6 ms         8.77 ms            3 items_per_second=481.558/s max_us=7.86507k p50_us=0 p99_us=1.71617
+BM_RandLoad/100000_cv            2.50 %          0.65 %             3 items_per_second=0.65% max_us=33.71% p50_us=0.00% p99_us=1.80%
+BM_SeqLoadSync/2000_mean          106 ms         63.1 ms            3 items_per_second=31.7704k/s max_us=1.75994k p50_us=38.9443 p99_us=255.305
+BM_SeqLoadSync/2000_median        104 ms         61.5 ms            3 items_per_second=32.5421k/s max_us=690.25 p50_us=38.791 p99_us=230.583
+BM_SeqLoadSync/2000_stddev       3.71 ms         3.77 ms            3 items_per_second=1.83871k/s max_us=1.94364k p50_us=0.340003 p99_us=46.9201
+BM_SeqLoadSync/2000_cv           3.52 %          5.97 %             3 items_per_second=5.79% max_us=110.44% p50_us=0.87% p99_us=18.38%
+BM_ReadUniform/64_mean        4112467 ns      4107767 ns            3 items_per_second=243.442k/s max_us=94.8057 p50_us=4.41633 p99_us=4.94433 pool_hit_pct=57.4661
+BM_ReadUniform/64_median      4105809 ns      4102694 ns            3 items_per_second=243.742k/s max_us=96.875 p50_us=4.416 p99_us=4.917 pool_hit_pct=57.4661
+BM_ReadUniform/64_stddev        12888 ns        11173 ns            3 items_per_second=661.204/s max_us=6.96355 p50_us=577.35u p99_us=0.0482113 pool_hit_pct=1.16801u
+BM_ReadUniform/64_cv             0.31 %          0.27 %             3 items_per_second=0.27% max_us=7.35% p50_us=0.01% p99_us=0.98% pool_hit_pct=0.00%
+BM_ReadUniform/8192_mean      1211931 ns      1207847 ns            3 items_per_second=828.13k/s max_us=232.486 p50_us=1.028 p99_us=3 pool_hit_pct=99.6703
+BM_ReadUniform/8192_median    1202746 ns      1201294 ns            3 items_per_second=832.435k/s max_us=142 p50_us=1.042 p99_us=3 pool_hit_pct=99.6703
+BM_ReadUniform/8192_stddev      28790 ns        23656 ns            3 items_per_second=16.0997k/s max_us=206.662 p50_us=0.0242487 p99_us=0.042 pool_hit_pct=0
+BM_ReadUniform/8192_cv           2.38 %          1.96 %             3 items_per_second=1.94% max_us=88.89% p50_us=2.36% p99_us=1.40% pool_hit_pct=0.00%
+BM_ReadZipfian/64_mean        3635890 ns      3565455 ns            3 items_per_second=280.472k/s max_us=8.02383k p50_us=4.25 p99_us=5.097 pool_hit_pct=65.1147
+BM_ReadZipfian/64_median      3571090 ns      3558582 ns            3 items_per_second=281.011k/s max_us=1.33033k p50_us=4.25 p99_us=5.083 pool_hit_pct=65.1147
+BM_ReadZipfian/64_stddev       118557 ns        13562 ns            3 items_per_second=1.06451k/s max_us=12.6184k p50_us=0 p99_us=0.0631744 pool_hit_pct=0
+BM_ReadZipfian/64_cv             3.26 %          0.38 %             3 items_per_second=0.38% max_us=157.26% p50_us=0.00% p99_us=1.24% pool_hit_pct=0.00%
+BM_ReadZipfian/8192_mean      1149687 ns      1148781 ns            3 items_per_second=870.496k/s max_us=87.4723 p50_us=0.958 p99_us=3 pool_hit_pct=99.6902
+BM_ReadZipfian/8192_median    1151586 ns      1150385 ns            3 items_per_second=869.274k/s max_us=87.5 p50_us=0.958 p99_us=3 pool_hit_pct=99.6902
+BM_ReadZipfian/8192_stddev       4597 ns         4358 ns            3 items_per_second=3.30845k/s max_us=1.12476 p50_us=12.9048n p99_us=0 pool_hit_pct=0
+BM_ReadZipfian/8192_cv           0.40 %          0.38 %             3 items_per_second=0.38% max_us=1.29% p50_us=0.00% p99_us=0.00% pool_hit_pct=0.00%
+BM_Mixed95_5/8192_mean        2637350 ns      2052470 ns            3 items_per_second=487.228k/s max_us=31.1407k p50_us=1.09767 p99_us=4.125
+BM_Mixed95_5/8192_median      2609784 ns      2051451 ns            3 items_per_second=487.46k/s max_us=22.5067k p50_us=1.084 p99_us=4.125
+BM_Mixed95_5/8192_stddev        64440 ns        11282 ns            3 items_per_second=2.67622k/s max_us=15.551k p50_us=0.0236714 p99_us=0
+BM_Mixed95_5/8192_cv             2.44 %          0.55 %             3 items_per_second=0.55% max_us=49.94% p50_us=2.16% p99_us=0.00%
+BM_ScanHeavy_mean                4925 ns         4921 ns            3 items_per_second=20.3125M/s max_us=100.653 p50_us=4.65233 p99_us=10.139 scans_per_s=203.23k/s
+BM_ScanHeavy_median              4934 ns         4931 ns            3 items_per_second=20.2689M/s max_us=91.167 p50_us=4.666 p99_us=10.167 scans_per_s=202.794k/s
+BM_ScanHeavy_stddev              25.2 ns         23.6 ns            3 items_per_second=97.6192k/s max_us=19.7673 p50_us=0.0236714 p99_us=0.12733 scans_per_s=976.698/s
+BM_ScanHeavy_cv                  0.51 %          0.48 %             3 items_per_second=0.48% max_us=19.64% p50_us=0.51% p99_us=1.26% scans_per_s=0.48%
+BM_DeleteChurn_mean          14444574 ns      8479845 ns            3 items_per_second=117.958k/s max_us=28.0328k p50_us=2.208 p99_us=81.25
+BM_DeleteChurn_median        14524982 ns      8500464 ns            3 items_per_second=117.641k/s max_us=26.5125k p50_us=2.208 p99_us=80.5
+BM_DeleteChurn_stddev          436375 ns       168283 ns            3 items_per_second=2.34974k/s max_us=6.57436k p50_us=0 p99_us=2.42173
+BM_DeleteChurn_cv                3.02 %          1.98 %             3 items_per_second=1.99% max_us=23.45% p50_us=0.00% p99_us=2.98%

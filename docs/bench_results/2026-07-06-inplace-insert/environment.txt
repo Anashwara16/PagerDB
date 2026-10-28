@@ -1,0 +1,10 @@
+date:      2026-07-06T16:23:55Z
+label:     inplace-insert
+host:      Darwin 25.5.0 arm64
+cpu:       Apple M2
+mem_bytes: 8589934592
+compiler:  Apple clang version 21.0.0 (clang-2100.1.1.101)
+build:     Release (-O3 -DNDEBUG), preset 'bench'
+seed:      42
+reps:      3
+git:       2233a00 (+ uncommitted work)

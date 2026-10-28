@@ -1,0 +1,94 @@
+# ==============================================================================
+# CI (Phase 6, task 6.3)
+# ==============================================================================
+#
+# Matrix: {gcc-14, clang-18} x {asan (Debug + ASan/UBSan + full test suite),
+# release (-O3 build of the library, tools, and benchmarks)}, plus a single
+# clang-18 tsan job (full suite) enforcing the Phase 5 invariant: no data
+# race across the whole suite. One tsan job is enough - races are not
+# compiler-specific at this level - and halt_on_error keeps the first report
+# at the bottom of the log.
+#
+# The asan jobs run the whole suite, which includes the fork-based crash
+# harness in short mode (KVSTORE_CRASH_RUNS defaults to 25); a separate step
+# then runs a slightly longer harness pass (100 seeded runs). The 500-run C4
+# gate stays a manual/local job - it takes minutes under ASan.
+#
+# The release jobs also build the benchmarks (KVSTORE_BUILD_BENCH=ON): on
+# x86-64 runners this compiles the portable slicing-by-8 CRC path that the
+# ARM development machine never builds, plus the sqlite_bench baseline.
+
+name: CI
+
+on:
+  push:
+    branches: [main, pager]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.compiler }} / ${{ matrix.preset }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        preset: [asan, release]
+        include:
+          - compiler: clang
+            preset: tsan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            # Clang builds use libc++ (see CMakeLists.txt) for full C++23.
+            sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev
+            echo "CC=clang-18" >> "$GITHUB_ENV"
+            echo "CXX=clang++-18" >> "$GITHUB_ENV"
+          else
+            sudo apt-get install -y g++-14
+            echo "CC=gcc-14" >> "$GITHUB_ENV"
+            echo "CXX=g++-14" >> "$GITHUB_ENV"
+          fi
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Configure
+        run: |
+          EXTRA=""
+          if [ "${{ matrix.preset }}" = "release" ]; then
+            EXTRA="-DKVSTORE_BUILD_BENCH=ON"
+          fi
+          cmake --preset ${{ matrix.preset }} $EXTRA
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j "$(nproc)"
+
+      # Recent runner kernels randomize mmap harder than the sanitizer
+      # runtimes tolerate (spurious DEADLYSIGNAL / "unexpected memory
+      # mapping") - the standard workaround, needed by ASan and TSan alike.
+      - name: Lower ASLR entropy for sanitizers
+        if: matrix.preset != 'release'
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Test (full suite)
+        if: matrix.preset != 'release'
+        env:
+          # Fail on the first race with the report right at the log's end.
+          TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Crash harness (100 seeded runs)
+        if: matrix.preset == 'asan'
+        env:
+          KVSTORE_CRASH_RUNS: 100
+        run: ./build/asan/crash_test
+
+      - name: Benchmark smoke (compile + one tiny pass)
+        if: matrix.preset == 'release'
+        run: |
+          ./build/release/db_bench --benchmark_filter='BM_SeqLoadSync' \
+              --benchmark_min_time=1x
