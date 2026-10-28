@@ -64,6 +64,7 @@
 #include <cstdint>
 #include <cstring>       // memset, memcpy
 #include <cassert>
+#include <iosfwd>        // std::ostream forward declaration (Dump)
 #include <string_view>
 #include <expected>      // C++23: std::expected for error handling
 #include <utility>       // C++23: std::to_underlying, std::unreachable
@@ -146,12 +147,14 @@ enum class PageType : uint8_t {
 //   8       8     page_lsn        - LSN of last modification
 //   16      2     free_space_start - Offset where free space begins (after slots)
 //   18      2     free_space_end   - Offset where free space ends (before data)
-//   20      4     next_page       - Linked list pointer (for leaf pages, free list)
-//   24      4     prev_page       - Linked list pointer (for leaf pages)
+//   20      4     next_page       - Linked list pointer (leaf pages only)
+//   24      4     prev_page       - Linked list pointer (leaf pages only)
 //   28      4     checksum        - CRC32 of page contents (excluding checksum)
-//   32      8     reserved        - Padding for alignment / future use
+//   32      4     rightmost_child - Internal nodes: child for keys >= last key
+//   36      2     dead_bytes      - Reclaimable record bytes (deleted records)
+//   38      2     reserved2       - Padding / future use
 //
-// Total: 40 bytes
+// Total: 40 bytes (format v2 — see docs/FORMAT.md)
 
 struct PageHeader {
     PageId   page_id;           // This page's ID (redundant but useful for validation)
@@ -164,7 +167,9 @@ struct PageHeader {
     PageId   next_page;         // For leaf pages: next leaf in key order
     PageId   prev_page;         // For leaf pages: previous leaf in key order
     uint32_t checksum;          // CRC32 checksum for corruption detection
-    uint64_t reserved;          // Padding / future use
+    PageId   rightmost_child;   // For internal nodes: child for keys >= last key
+    uint16_t dead_bytes;        // Bytes held by deleted records (compaction input)
+    uint16_t reserved2;         // Padding / future use
 
     // Initialize a new page header
     constexpr void Init(PageId id, PageType t) noexcept {
@@ -179,7 +184,9 @@ struct PageHeader {
         next_page = kInvalidPageId;
         prev_page = kInvalidPageId;
         checksum = 0;
-        reserved = 0;
+        rightmost_child = kInvalidPageId;
+        dead_bytes = 0;
+        reserved2 = 0;
     }
     
     // Calculate available free space in bytes
@@ -482,22 +489,90 @@ public:
         return new_slot_id;  // Implicitly converts to std::expected success
     }
     
+    // Insert a record at a specific slot position, shifting later slots up
+    // by one (Phase 6 optimization #2: replaces the rebuild-the-whole-page
+    // insert path - defect #10). Record bytes still go to free_space_end;
+    // only the slot directory moves. The caller is responsible for having
+    // compacted the page if free space is fragmented (NodeView::EnsureFit).
+    [[nodiscard]] std::expected<SlotId, Status> InsertRecordAt(
+        SlotId index,
+        const void* data,
+        uint16_t length
+    ) {
+        if (index > header()->num_slots) {
+            return std::unexpected(Status::InvalidArgument("Slot index out of range"));
+        }
+        if (!CanFit(length)) {
+            return std::unexpected(Status::NoSpace("Page full"));
+        }
+
+        const uint16_t new_data_offset =
+            static_cast<uint16_t>(header()->free_space_end - length);
+
+        // Shift the slot directory tail up one entry to open the gap.
+        SlotEntry* s = slots();
+        std::memmove(&s[index + 1], &s[index],
+                     static_cast<size_t>(header()->num_slots - index) *
+                         sizeof(SlotEntry));
+        s[index].Init(new_data_offset, length);
+
+        header()->num_slots++;
+        header()->free_space_start =
+            static_cast<uint16_t>(sizeof(PageHeader) +
+                                  header()->num_slots * sizeof(SlotEntry));
+        header()->free_space_end = new_data_offset;
+
+        std::memcpy(data_ + new_data_offset, data, length);
+        return index;
+    }
+
     // Delete a record by marking its slot as deleted
-    // The space is NOT immediately reclaimed - call Compact() to reclaim
+    // The space is NOT immediately reclaimed - call Compact() to reclaim.
+    // The record bytes are added to header dead_bytes (compaction input).
     [[nodiscard]] std::expected<void, Status> DeleteRecord(SlotId slot_id) {
         if (slot_id >= header()->num_slots) {
             return std::unexpected(Status::InvalidArgument("Invalid slot ID"));
         }
-        
+
         SlotEntry& s = slot(slot_id);
         if (!s.IsValid()) {
             return std::unexpected(Status::NotFound("Record already deleted"));
         }
-        
+
         s.MarkDeleted();
+        header()->dead_bytes = static_cast<uint16_t>(header()->dead_bytes + s.length);
         return {};  // Success: empty expected<void, E>
     }
+
+    // Reclaim dead record bytes (Phase 2, task 2.4): pack all live records
+    // back against the end of the page, rewrite slot offsets (slot IDs are
+    // stable), drop tombstoned records' bytes, and zero dead_bytes. The freed
+    // region is zero-filled so page images stay deterministic.
+    void Compact();
     
+    // -------------------------------------------------------------------------
+    // Integrity (format v2)
+    // -------------------------------------------------------------------------
+
+    // CRC32 over the whole page with the header checksum field treated as zero.
+    // The Pager stamps this on write and verifies it on read; see docs/FORMAT.md.
+    [[nodiscard]] uint32_t ComputeChecksum() const noexcept;
+
+    // True when every byte of the page is zero (allocated but never written).
+    // Such pages are exempt from checksum verification.
+    [[nodiscard]] bool IsZeroed() const noexcept;
+
+    // Check structural invariants of the slotted page:
+    //   - free_space_start == sizeof(PageHeader) + num_slots * sizeof(SlotEntry)
+    //   - free_space_start <= free_space_end <= kPageSize
+    //   - every live slot's record lies in [free_space_end, kPageSize]
+    //   - live records do not overlap
+    // Intended for assert() after mutations and for kvstore_inspect.
+    [[nodiscard]] bool Validate() const;
+
+    // Write a human-readable header + slot-directory summary (debugging aid).
+    void Dump(std::ostream& out) const;
+
     // -------------------------------------------------------------------------
     // Raw Data Access (for disk I/O)
     // -------------------------------------------------------------------------
@@ -527,5 +602,21 @@ private:
 
 // Verify Page is exactly kPageSize
 static_assert(sizeof(Page) == kPageSize, "Page must be exactly kPageSize bytes");
+
+// ==============================================================================
+// Checksum Helper
+// ==============================================================================
+//
+// CRC-32 (polynomial 0xEDB88320, init/final-xor 0xFFFFFFFF) over `len` bytes
+// of `data`, with the 4-byte field at `field_offset` treated as zero. Used for
+// both PageHeader::checksum and MetaPage::checksum so a stored checksum never
+// feeds into its own computation. Implemented in page.cc.
+
+[[nodiscard]] uint32_t Crc32WithZeroedField(const void* data, size_t len,
+                                            size_t field_offset) noexcept;
+
+// Plain CRC-32 over `len` bytes (same polynomial/parameters). Used by the
+// WAL record encoding (Phase 4).
+[[nodiscard]] uint32_t Crc32(const void* data, size_t len) noexcept;
 
 }  // namespace kvstore::storage

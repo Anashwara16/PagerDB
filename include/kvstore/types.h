@@ -6,7 +6,7 @@
 // Having these in a single location ensures consistency and makes it easy to
 // change the size of identifiers if needed (e.g., upgrading to 64-bit page IDs).
 //
-// Design Philosophy:
+// Design Philosophy:   
 // -----------------
 // We use type aliases (using/typedef) rather than raw integers because:
 //   1. Self-documenting code: PageId is clearer than uint32_t
@@ -129,6 +129,15 @@ static_assert(sizeof(SlotId) == 2, "SlotId must be 2 bytes");
 
 // Maximum meaningful slot ID (used for bounds checking)
 constexpr SlotId kInvalidSlotId = std::numeric_limits<SlotId>::max();
+
+// ==============================================================================
+// Frame Identifiers (Phase 3)
+// ==============================================================================
+//
+// Index of a frame (page-sized slot) inside the buffer pool. Frames are a
+// purely in-memory concept - FrameIds are never persisted.
+
+using FrameId = std::uint32_t;
 
 // ==============================================================================
 // Size Types

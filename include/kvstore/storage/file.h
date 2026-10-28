@@ -72,6 +72,7 @@ struct FileError {
     enum class Kind {
         NotFound,       // File doesn't exist
         IoError,        // General I/O error
+        Busy,           // Lock held by another process (TryLockExclusive)
         InternalError   // Programming error (e.g., operation on closed file)
     };
 
@@ -85,6 +86,10 @@ struct FileError {
 
     [[nodiscard]] static FileError IoError(std::string_view msg) {
         return {Kind::IoError, std::string(msg)};
+    }
+
+    [[nodiscard]] static FileError Busy(std::string_view msg) {
+        return {Kind::Busy, std::string(msg)};
     }
 
     [[nodiscard]] static FileError Internal(std::string_view msg) {
@@ -217,6 +222,28 @@ public:
     // because it doesn't update file metadata (modification time, etc.)
     // unless necessary for data integrity.
     [[nodiscard]] FileStatus Sync();
+
+    // Process-wide count of successful Sync() calls across all PosixFiles.
+    // Test hook for asserting sync policy (e.g. Options::sync_on_write=false
+    // must issue zero syncs); not meant for production decisions.
+    [[nodiscard]] static uint64_t TotalSyncs() noexcept;
+
+    // Test-only fault injection (Phase 4 crash tests): after `n` more
+    // successful writes, the next write persists only half its bytes and
+    // returns IoError (a torn write); subsequent writes keep failing until
+    // ClearWriteFailure(). Process-wide, like TotalSyncs.
+    static void FailAfterNWrites(int64_t n) noexcept;
+    static void ClearWriteFailure() noexcept;
+
+    // Try to take an exclusive advisory lock on the whole file (flock,
+    // non-blocking). Returns FileError::Busy if another process (or another
+    // open of the same file in this process) holds the lock.
+    //
+    // The lock belongs to this open file description: it is released when
+    // the PosixFile is closed/destroyed, and by the KERNEL if the process
+    // dies - a crashed holder never leaves a stale lock behind. Advisory
+    // only: it excludes other flock callers, not arbitrary writers.
+    [[nodiscard]] FileStatus TryLockExclusive();
 
     // Get the current size of the file in bytes.
     //

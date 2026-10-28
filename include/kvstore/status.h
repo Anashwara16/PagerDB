@@ -52,7 +52,6 @@ enum class StatusCode {
 };
 
 // Lightweight value type used to report operation success or failure.
-//
 // A default-constructed Status is successful. Error statuses carry a non-kOk
 // StatusCode and may include diagnostic text suitable for logs.
 class Status {

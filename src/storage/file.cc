@@ -30,15 +30,37 @@
 
 #include "kvstore/storage/file.h"
 
+#include <atomic>       // std::atomic (TotalSyncs counter)
 #include <utility>      // move & std::exchange
 #include <fcntl.h>      // open(), O_RDWR, O_CREAT, etc.
 #include <unistd.h>     // close(), pread(), pwrite(), fdatasync(), ftruncate()
+#include <sys/file.h>   // flock(), LOCK_EX, LOCK_NB
 #include <sys/stat.h>   // fstat(), struct stat
 #include <cerrno>       // errno
 #include <cstring>      // strerror()
 #include <format>       // std::format (C++23)
+#include <limits>       // std::numeric_limits (fault-hook sentinel)
+#include <tuple>        // std::ignore
 
 namespace kvstore::storage {
+
+namespace {
+
+// Process-wide successful-Sync counter backing PosixFile::TotalSyncs().
+std::atomic<uint64_t> g_total_syncs{0};
+
+// Phase 4 fault injection (test hook, see PosixFile::FailAfterNWrites):
+// kFaultDisarmed = disarmed; otherwise the number of writes still allowed to
+// succeed. At 0 the next write persists only half its bytes and fails (a
+// torn write), and every write after that fails too. Consumed with a CAS
+// decrement so concurrent writers each take a distinct credit - a plain
+// load-then-store pair could hand two writers the same count. The sentinel
+// is INT64_MIN (not -1) so the post-fire values, which keep decrementing
+// below zero, can never collide with "disarmed".
+constexpr int64_t kFaultDisarmed = std::numeric_limits<int64_t>::min();
+std::atomic<int64_t> g_fail_after_writes{kFaultDisarmed};
+
+}  // namespace
 
 // ==============================================================================
 // Helper Function
@@ -234,6 +256,26 @@ FileStatus PosixFile::Write(uint64_t offset, const void* buf, size_t size) {
     //
     // Note: pwrite() extends the file if writing past current EOF
     
+    // Fault injection (Phase 4 crash tests): tear the (n+1)th write. CAS
+    // loop so each concurrent writer consumes exactly one credit; whoever
+    // decrements from 0 (or below) is in the failing regime.
+    if (int64_t remaining = g_fail_after_writes.load(std::memory_order_relaxed);
+        remaining != kFaultDisarmed) [[unlikely]] {
+        while (remaining != kFaultDisarmed &&
+               !g_fail_after_writes.compare_exchange_weak(
+                   remaining, remaining - 1, std::memory_order_relaxed)) {
+            // remaining reloaded by the failed CAS; re-check for a
+            // concurrent ClearWriteFailure.
+        }
+        if (remaining != kFaultDisarmed && remaining <= 0) {
+            // Persist half the bytes, then report failure - what a power
+            // cut mid-pwrite leaves behind.
+            std::ignore = ::pwrite(fd_, buf, size / 2, static_cast<off_t>(offset));
+            return std::unexpected(FileError::IoError(
+                std::format("Injected write failure (torn) on '{}'", path_)));
+        }
+    }
+
     ssize_t bytes_written = ::pwrite(fd_, buf, size, static_cast<off_t>(offset));
     
     if (bytes_written < 0) {
@@ -288,7 +330,41 @@ FileStatus PosixFile::Sync() {
     }
 #endif
 
+    g_total_syncs.fetch_add(1, std::memory_order_relaxed);
     return {};
+}
+
+uint64_t PosixFile::TotalSyncs() noexcept {
+    return g_total_syncs.load(std::memory_order_relaxed);
+}
+
+// ==============================================================================
+// TryLockExclusive
+// ==============================================================================
+
+FileStatus PosixFile::TryLockExclusive() {
+    if (fd_ < 0) {
+        return std::unexpected(
+            FileError::Internal("TryLockExclusive called on closed file"));
+    }
+    if (::flock(fd_, LOCK_EX | LOCK_NB) < 0) {
+        if (errno == EWOULDBLOCK) {
+            return std::unexpected(FileError::Busy(std::format(
+                "'{}' is locked by another process", path_)));
+        }
+        return IoErrorFromErrno("flock failed", path_);
+    }
+    // No explicit unlock: the lock dies with this open file description
+    // (Close/destructor), or with the process.
+    return {};
+}
+
+void PosixFile::FailAfterNWrites(int64_t n) noexcept {
+    g_fail_after_writes.store(n, std::memory_order_relaxed);
+}
+
+void PosixFile::ClearWriteFailure() noexcept {
+    g_fail_after_writes.store(kFaultDisarmed, std::memory_order_relaxed);
 }
 
 // ==============================================================================

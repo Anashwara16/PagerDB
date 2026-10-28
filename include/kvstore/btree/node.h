@@ -25,7 +25,7 @@
 // INTERNAL NODE: Stores keys and child page pointers
 //   ┌─────────────────────────────────────────────────────────────┐
 //   │ Page Header (type=kInternal, num_slots=N)                   │
-//   │ rightmost_child stored in header.next_leaf field            │
+//   │ rightmost_child stored in header.rightmost_child (v2)       │
 //   ├─────────────────────────────────────────────────────────────┤
 //   │ Slot 0 │ Slot 1 │ ... │ Slot N-1 │     free space          │
 //   ├─────────────────────────────────────────────────────────────┤
@@ -101,7 +101,7 @@ public:
     
     constexpr void InitInternal() noexcept {
         page_.header()->type = storage::PageType::kInternal;
-        page_.header()->next_page = kInvalidPageId;  // Used as rightmost_child
+        page_.header()->rightmost_child = kInvalidPageId;
     }
     
     // -------------------------------------------------------------------------
@@ -175,6 +175,14 @@ public:
     // Returns false if key not found or new value doesn't fit
     [[nodiscard("UpdateLeaf returns success status")]]
     bool UpdateLeaf(std::string_view key, std::string_view new_value);
+
+    // Delete the entry at `index` (Phase 2, task 2.1).
+    // The slot directory shifts down (slot space is reclaimed immediately);
+    // the record bytes stay behind and are added to header dead_bytes until
+    // a compaction or page rebuild reclaims them.
+    // Returns false if index is out of range.
+    [[nodiscard("DeleteAt returns success status")]]
+    bool DeleteAt(uint16_t index);
     
     // -------------------------------------------------------------------------
     // Internal Node Operations
@@ -188,14 +196,21 @@ public:
     // Get the rightmost child (for keys >= last key)
     [[nodiscard("GetRightmostChild returns rightmost child page ID")]]
     constexpr PageId GetRightmostChild(this auto&& self) noexcept {
-        return self.page_.header()->next_page;  // We reuse this field
+        return self.page_.header()->rightmost_child;
     }
     
     // Set the rightmost child
     constexpr void SetRightmostChild(PageId child) noexcept {
-        page_.header()->next_page = child;
+        page_.header()->rightmost_child = child;
     }
     
+    // Find the child SLOT index to follow for a given key (internal nodes).
+    // Returns a value in [0, NumKeys()]; NumKeys() means the rightmost child.
+    // Keys equal to a separator descend RIGHT of it (tree invariant: child_i
+    // holds keys < key_i). Get and Put descents must both use this.
+    [[nodiscard("FindChildIndex returns the child slot to descend into")]]
+    uint16_t FindChildIndex(std::string_view key) const;
+
     // Find which child to follow for a given key
     // Returns the PageId of the child that might contain the key
     [[nodiscard("FindChild returns the child to descend into")]]
@@ -304,6 +319,12 @@ private:
     // Insert at a specific position (shifts other entries)
     [[nodiscard]]
     bool InsertAt(uint16_t index, const std::string& encoded_record);
+
+    // Space gate for inserts (Phase 2, task 2.5): true if `needed` bytes fit
+    // in contiguous free space, or would fit once dead record bytes are
+    // reclaimed - in which case the page is compacted first.
+    [[nodiscard]]
+    bool EnsureFit(size_t needed);
 };
 
 }  // namespace kvstore::btree
