@@ -10,7 +10,6 @@
 //
 // C++23 Features Used:
 // --------------------
-//   - [[maybe_unused]] attribute for intentionally unused items
 //   - std::bit_cast for safe type punning (in future implementations)
 //   - constexpr where applicable
 //
@@ -68,21 +67,7 @@ namespace kvstore::storage {
 //        //   - All slot offsets are within bounds
 //    }
 
-// ==============================================================================
-// Implementation Placeholder
-// ==============================================================================
-//
-// This namespace-scope function ensures the translation unit isn't empty.
-// Empty translation units can cause linker warnings on some platforms.
-
 namespace {
-
-// C++23: [[maybe_unused]] suppresses warnings for intentionally unused code
-[[maybe_unused]] 
-constexpr void placeholder() noexcept {
-    // This function exists only to prevent empty translation unit warnings.
-    // It will be optimized away completely by the compiler.
-}
 
 // CRC-32 (polynomial 0xEDB88320, reflected), byte-identical on every path.
 //
