@@ -58,14 +58,6 @@ namespace kvstore::storage {
 // ==============================================================================
 //
 // std::expected<T, E> is C++23's way of returning "either a value or an error"
-// It's similar to Rust's Result<T, E> or your previous custom Result<T>
-//
-// Key differences from your old Result<T>:
-//   - Standard library type (no custom code needed)
-//   - .value() returns the success value (throws if error)
-//   - .error() returns the error (undefined if success)
-//   - .has_value() or operator bool() checks for success
-//   - .value_or(default) returns value or default if error
 
 // Error information for file operations
 struct FileError {
