@@ -26,12 +26,13 @@ Status FileErrorToStatus(const storage::FileError& err) {
 
 }  // namespace
 
-Result<LogWriter> LogWriter::Open(const std::string& path, Lsn base_lsn) {
-    auto file_result = storage::PosixFile::Open(path, /*create_if_missing=*/true);
+Result<LogWriter> LogWriter::Open(const std::string& path, Lsn base_lsn,
+                                  storage::Env* env) {
+    auto file_result = env->OpenFile(path, /*create_if_missing=*/true);
     if (!file_result) [[unlikely]] {
         return std::unexpected(FileErrorToStatus(file_result.error()));
     }
-    auto size_result = file_result->Size();
+    auto size_result = (*file_result)->Size();
     if (!size_result) [[unlikely]] {
         return std::unexpected(FileErrorToStatus(size_result.error()));
     }
@@ -78,7 +79,7 @@ Status LogWriter::FlushLocked() {
     }
 
     if (!buffer_.empty()) {
-        auto write_result = file_.Write(file_bytes_, buffer_.data(), buffer_.size());
+        auto write_result = file_->Write(file_bytes_, buffer_.data(), buffer_.size());
         if (!write_result) [[unlikely]] {
             return FileErrorToStatus(write_result.error());
         }
@@ -86,7 +87,7 @@ Status LogWriter::FlushLocked() {
         buffer_.clear();
     }
 
-    auto sync_result = file_.Sync();
+    auto sync_result = file_->Sync();
     if (!sync_result) [[unlikely]] {
         return FileErrorToStatus(sync_result.error());
     }
@@ -115,11 +116,11 @@ Status LogWriter::FlushTo(Lsn lsn) {
 
 Status LogWriter::Truncate(Lsn new_base) {
     std::lock_guard<std::mutex> lg(*mu_);
-    auto truncate_result = file_.Truncate(0);
+    auto truncate_result = file_->Truncate(0);
     if (!truncate_result) [[unlikely]] {
         return FileErrorToStatus(truncate_result.error());
     }
-    auto sync_result = file_.Sync();
+    auto sync_result = file_->Sync();
     if (!sync_result) [[unlikely]] {
         return FileErrorToStatus(sync_result.error());
     }

@@ -113,10 +113,15 @@ callback returns false, or the chain ends.
 
 ## Modules in one paragraph each
 
-**PosixFile** (`storage/file.h`): move-only RAII fd; `pread`/`pwrite`
-positioned I/O; `Sync` is `fsync` (macOS note: `F_FULLFSYNC` is documented
-but not default — see DESIGN_DECISIONS); test hooks `TotalSyncs()` and
-`FailAfterNWrites(n)` power the sync-policy tests and the crash harness.
+**File / Env / PosixFile** (`storage/file.h`): `File` is the abstract I/O
+seam; `Env` opens files (`Env::Default()` = POSIX, overridable via
+`Options::env`). `PosixFile` is the move-only RAII fd implementation:
+`pread`/`pwrite` positioned I/O; `Sync` is `fsync` (macOS note: `F_FULLFSYNC`
+is documented but not default — see DESIGN_DECISIONS). Pager and LogWriter
+own a `std::unique_ptr<File>`. Tests inject `test::FaultInjectionEnv`
+(`tests/fault_injection_env.h`), whose per-instance sync counter and torn-write
+fault power the sync-policy tests and the crash harness; no test code ships
+in the library.
 
 **Page / PageHeader / SlotEntry** (`storage/page_format.h`): 4 KB slotted
 page; 40-byte header (type, LSN, free-space bounds, sibling links, CRC-32,

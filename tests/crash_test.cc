@@ -44,9 +44,9 @@
 
 #include "kvstore/btree/node.h"
 #include "kvstore/db.h"
-#include "kvstore/storage/file.h"
 #include "kvstore/storage/page_format.h"
 #include "kvstore/storage/pager.h"
+#include "fault_injection_env.h"
 
 namespace kvstore {
 namespace {
@@ -270,7 +270,9 @@ void ApplyToModel(std::map<std::string, std::string>& model, const Op& op) {
 // Child body: never returns. Exit codes: 0 = finished all ops, 3 = crashed
 // at the armed fault (the expected case), 4 = setup failure.
 [[noreturn]] void RunChild(const fs::path& dir, uint32_t seed, int op_count) {
+    test::FaultInjectionEnv env;  // Lives until _exit; DB never outlives it
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;    // Acked == committed
     options.buffer_pool_frames = 8;  // Constant eviction pressure
@@ -291,7 +293,7 @@ void ApplyToModel(std::map<std::string, std::string>& model, const Op& op) {
 
     // Seeded fault: fires inside a Put/Delete/checkpoint at any depth.
     std::mt19937 fault_rng(seed ^ 0x5EEDF00Du);
-    storage::PosixFile::FailAfterNWrites(
+    env.FailAfterNWrites(
         std::uniform_int_distribution<int64_t>(1, 300)(fault_rng));
 
     for (const auto& op : ops) {
@@ -547,7 +549,9 @@ std::vector<TxnSpec> GenerateTxns(uint32_t seed, int count) {
 
 [[noreturn]] void RunTxnStreamChild(const fs::path& dir, uint32_t seed,
                                     int txn_count) {
+    test::FaultInjectionEnv env;  // Lives until _exit; DB never outlives it
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;
     options.buffer_pool_frames = 8;
@@ -562,7 +566,7 @@ std::vector<TxnSpec> GenerateTxns(uint32_t seed, int count) {
 
     const auto txns = GenerateTxns(seed, txn_count);
     std::mt19937 fault_rng(seed ^ 0x7A11FEEDu);
-    storage::PosixFile::FailAfterNWrites(
+    env.FailAfterNWrites(
         std::uniform_int_distribution<int64_t>(1, 350)(fault_rng));
 
     for (const auto& t : txns) {
@@ -689,7 +693,9 @@ std::string MtValue(int thread_id, int i) {
 
 [[noreturn]] void RunConcurrentChild(const fs::path& dir, uint32_t seed,
                                      int ops_per_thread) {
+    test::FaultInjectionEnv env;  // Lives until _exit; DB never outlives it
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;       // Acked == committed
     // Eviction pressure across 4 writers, with headroom for the op-group
@@ -704,7 +710,7 @@ std::string MtValue(int thread_id, int i) {
     auto db = std::move(*open_result);
 
     std::mt19937 fault_rng(seed ^ 0xC0FFEE42u);
-    storage::PosixFile::FailAfterNWrites(
+    env.FailAfterNWrites(
         std::uniform_int_distribution<int64_t>(50, 1200)(fault_rng));
 
     std::vector<std::thread> threads;

@@ -65,7 +65,7 @@ static Status FileErrorToStatus(const FileError& err) {
 // Private Constructor
 // ==============================================================================
 
-Pager::Pager(PosixFile file, MetaPage meta, bool verify_checksums)
+Pager::Pager(std::unique_ptr<File> file, MetaPage meta, bool verify_checksums)
     : file_(std::move(file))
     , meta_(meta)
     , verify_checksums_(verify_checksums)
@@ -99,21 +99,21 @@ Pager& Pager::operator=(Pager&& other) noexcept {
 // ==============================================================================
 
 Result<Pager> Pager::Open(const std::string& path, bool create_if_missing,
-                          bool verify_checksums) {
+                          bool verify_checksums, Env* env) {
     // -------------------------------------------------------------------------
     // Step 1: Open the file
     // -------------------------------------------------------------------------
-    auto file_result = PosixFile::Open(path, create_if_missing);
+    auto file_result = env->OpenFile(path, create_if_missing);
     if (!file_result) [[unlikely]] {
         return std::unexpected(FileErrorToStatus(file_result.error()));
     }
     
-    PosixFile file = std::move(*file_result);
+    std::unique_ptr<File> file = std::move(*file_result);
     
     // -------------------------------------------------------------------------
     // Step 2: Check file size to determine if this is a new database
     // -------------------------------------------------------------------------
-    auto size_result = file.Size();
+    auto size_result = file->Size();
     if (!size_result) [[unlikely]] {
         return std::unexpected(FileErrorToStatus(size_result.error()));
     }
@@ -129,7 +129,7 @@ Result<Pager> Pager::Open(const std::string& path, bool create_if_missing,
         meta.checksum = ComputeMetaChecksum(meta);
 
         for (PageId slot = 0; slot < Pager::kFirstDataPage; ++slot) {
-            auto write_result = file.Write(
+            auto write_result = file->Write(
                 static_cast<uint64_t>(slot) * kPageSize, &meta, sizeof(MetaPage));
             if (!write_result) [[unlikely]] {
                 return std::unexpected(FileErrorToStatus(write_result.error()));
@@ -137,7 +137,7 @@ Result<Pager> Pager::Open(const std::string& path, bool create_if_missing,
         }
         
         // Sync to ensure the meta pages are durable
-        auto sync_result = file.Sync();
+        auto sync_result = file->Sync();
         if (!sync_result) [[unlikely]] {
             return std::unexpected(FileErrorToStatus(sync_result.error()));
         }
@@ -155,7 +155,7 @@ Result<Pager> Pager::Open(const std::string& path, bool create_if_missing,
         bool have_valid = false;
         for (PageId slot = 0; slot < Pager::kFirstDataPage; ++slot) {
             MetaPage candidate{};
-            auto read_result = file.Read(
+            auto read_result = file->Read(
                 static_cast<uint64_t>(slot) * kPageSize, &candidate, sizeof(MetaPage));
             if (!read_result) [[unlikely]] {
                 return std::unexpected(FileErrorToStatus(read_result.error()));
@@ -222,7 +222,7 @@ Status Pager::ReadPage(PageId page_id, Page& out) const {
     uint64_t offset = PageOffset(page_id);
     
     // Read directly into the Page's raw data
-    auto read_result = file_.Read(offset, out.RawData(), kPageSize);
+    auto read_result = file_->Read(offset, out.RawData(), kPageSize);
     if (!read_result) [[unlikely]] {
         return FileErrorToStatus(read_result.error());
     }
@@ -267,7 +267,7 @@ Status Pager::WritePage(PageId page_id, Page& page) {
 
     uint64_t offset = PageOffset(page_id);
     
-    auto write_result = file_.Write(offset, page.RawData(), kPageSize);
+    auto write_result = file_->Write(offset, page.RawData(), kPageSize);
     if (!write_result) [[unlikely]] {
         return FileErrorToStatus(write_result.error());
     }
@@ -305,7 +305,7 @@ Result<PageId> Pager::AllocatePage() {
         Page empty_page;
         std::memset(empty_page.RawData(), 0, kPageSize);
         auto write_result =
-            file_.Write(PageOffset(recycled), empty_page.RawData(), kPageSize);
+            file_->Write(PageOffset(recycled), empty_page.RawData(), kPageSize);
         if (!write_result) [[unlikely]] {
             return std::unexpected(FileErrorToStatus(write_result.error()));
         }
@@ -330,7 +330,7 @@ Result<PageId> Pager::AllocatePage() {
     std::memset(empty_page.RawData(), 0, kPageSize);
     
     uint64_t offset = PageOffset(new_page_id);
-    auto write_result = file_.Write(offset, empty_page.RawData(), kPageSize);
+    auto write_result = file_->Write(offset, empty_page.RawData(), kPageSize);
     if (!write_result) [[unlikely]] {
         return std::unexpected(FileErrorToStatus(write_result.error()));
     }
@@ -430,7 +430,7 @@ Status Pager::PersistMeta() {
 
     const uint64_t offset =
         static_cast<uint64_t>(snapshot.generation % 2) * kPageSize;
-    auto write_result = file_.Write(offset, &snapshot, sizeof(MetaPage));
+    auto write_result = file_->Write(offset, &snapshot, sizeof(MetaPage));
     if (!write_result) {
         // Roll the bump back so a retry does not skip a slot.
         std::lock_guard<std::mutex> lg(*meta_mu_);
@@ -452,7 +452,7 @@ Status Pager::Sync() {
 }
 
 Status Pager::SyncData() {
-    auto sync_result = file_.Sync();
+    auto sync_result = file_->Sync();
     if (!sync_result) {
         return FileErrorToStatus(sync_result.error());
     }

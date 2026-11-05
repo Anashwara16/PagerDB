@@ -23,6 +23,7 @@
 #include "kvstore/wal/log_reader.h"
 #include "kvstore/wal/log_record.h"
 #include "kvstore/wal/log_writer.h"
+#include "fault_injection_env.h"
 
 namespace kvstore::wal {
 namespace {
@@ -151,7 +152,8 @@ TEST_F(WalTest, WriterAssignsByteOffsetLsns) {
 }
 
 TEST_F(WalTest, FlushToIsIdempotentAndSyncs) {
-    auto writer = LogWriter::Open(wal_path_, kFirstLsn).value();
+    test::FaultInjectionEnv env;  // Counts syncs
+    auto writer = LogWriter::Open(wal_path_, kFirstLsn, &env).value();
 
     LogRecord rec;
     rec.type = LogRecordType::kPut;
@@ -161,14 +163,13 @@ TEST_F(WalTest, FlushToIsIdempotentAndSyncs) {
     const Lsn lsn = writer.Append(rec).value();
     EXPECT_LT(writer.flushed_lsn(), writer.end_lsn());  // Still buffered
 
-    const uint64_t syncs_before = storage::PosixFile::TotalSyncs();
     ASSERT_TRUE(writer.FlushTo(lsn).ok());
-    EXPECT_EQ(storage::PosixFile::TotalSyncs(), syncs_before + 1);
+    EXPECT_EQ(env.syncs(), 1u);
     EXPECT_EQ(writer.flushed_lsn(), writer.end_lsn());
 
     // Already durable: no further fsync.
     ASSERT_TRUE(writer.FlushTo(lsn).ok());
-    EXPECT_EQ(storage::PosixFile::TotalSyncs(), syncs_before + 1);
+    EXPECT_EQ(env.syncs(), 1u);
 }
 
 TEST_F(WalTest, ReaderReadsBackWhatWriterWrote) {
@@ -294,7 +295,8 @@ class WalRuleTest : public WalTest {
 protected:
     void SetUp() override {
         WalTest::SetUp();
-        auto pager = storage::Pager::Open((dir_ / "data.db").string(), true);
+        auto pager = storage::Pager::Open((dir_ / "data.db").string(), true,
+                                           /*verify_checksums=*/true, &env_);
         ASSERT_TRUE(pager.has_value()) << pager.error().message();
         pager_ = std::move(*pager);
         for (int i = 0; i < 8; ++i) {
@@ -319,6 +321,7 @@ protected:
         return lsn;
     }
 
+    test::FaultInjectionEnv env_;  // Declared before pager_: outlives it
     storage::Pager pager_;
 };
 
@@ -386,21 +389,21 @@ TEST_F(WalRuleTest, DirtyEvictionFlushesTheWholeAppendedLog) {
 }
 
 TEST_F(WalRuleTest, DirtyEvictionFailsAndKeepsPageWhenLogFlushFails) {
-    auto writer = LogWriter::Open(wal_path_, kFirstLsn).value();
+    auto writer = LogWriter::Open(wal_path_, kFirstLsn, &env_).value();
     storage::BufferPool pool(pager_, 4, &writer);
 
     DirtyPageTwoWithUnflushedRecord(pool, writer);
 
     // Every write now fails: the WAL flush inside the eviction path fails,
     // so the dirty page must NOT be written or discarded.
-    storage::PosixFile::FailAfterNWrites(0);
+    env_.FailAfterNWrites(0);
     for (PageId id = 3; id <= 5; ++id) {
         ASSERT_TRUE(pool.FetchPage(id).has_value());  // Fill remaining frames
     }
     auto blocked = pool.FetchPage(6);  // Needs to evict dirty page 2
     ASSERT_FALSE(blocked.has_value());
     EXPECT_TRUE(pool.IsResident(2)) << "dirty page must survive a failed flush";
-    storage::PosixFile::ClearWriteFailure();
+    env_.ClearWriteFailure();
 
     // With writes working again, cycling more pages than frames must
     // eventually evict (and write back) the dirty page. The failed attempt

@@ -78,6 +78,10 @@
 
 namespace kvstore {
 
+namespace storage {
+class Env;  // kvstore/storage/file.h; forward-declared to keep db.h lean
+}
+
 // ==============================================================================
 // Options
 // ==============================================================================
@@ -112,6 +116,11 @@ struct Options {
     // trigger; Checkpoint() can always be called manually. Checkpoints also
     // run on clean close.
     uint64_t max_wal_bytes = 4 * 1024 * 1024;
+
+    // Opens the data file and WAL. nullptr means storage::Env::Default()
+    // (plain POSIX files). Tests pass a fault-injecting Env here; it is not
+    // owned and must outlive the DB.
+    storage::Env* env = nullptr;
 
     // C++23: Default comparison operator
     [[nodiscard]]

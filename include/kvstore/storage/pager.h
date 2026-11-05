@@ -169,6 +169,7 @@ public:
     //   path              - Path to the database file
     //   create_if_missing - If true, create new database if file doesn't exist
     //   verify_checksums  - If true (default), verify page/meta CRC32 on read
+    //   env               - Opens the file; tests pass a fault-injecting Env
     //
     // Returns:
     //   On success: Pager ready for use
@@ -183,7 +184,8 @@ public:
     //   - Loads meta page into memory
     [[nodiscard("Open returns the Pager - ignoring it loses the file handle")]]
     static Result<Pager> Open(const std::string& path, bool create_if_missing,
-                              bool verify_checksums = true);
+                              bool verify_checksums = true,
+                              Env* env = Env::Default());
     
     // -------------------------------------------------------------------------
     // Page I/O
@@ -358,7 +360,7 @@ public:
 
 private:
     // Private constructor - use Open() factory method
-    Pager(PosixFile file, MetaPage meta, bool verify_checksums);
+    Pager(std::unique_ptr<File> file, MetaPage meta, bool verify_checksums);
     
     // Calculate file offset for a given page ID
     [[nodiscard("PageOffset returns byte offset")]]
@@ -367,7 +369,7 @@ private:
     }
     
     // The underlying file
-    PosixFile file_;
+    std::unique_ptr<File> file_;
     
     // In-memory copy of the meta page
     // Updated on allocation and root changes

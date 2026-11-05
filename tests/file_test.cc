@@ -16,6 +16,7 @@
 #include <string>
 
 #include "kvstore/storage/file.h"
+#include "fault_injection_env.h"
 
 namespace kvstore::storage {
 namespace {
@@ -133,35 +134,45 @@ TEST_F(FileTest, MoveAssignmentTransfersOwnership) {
 // after arming persists only half its bytes and reports IoError - a torn
 // write, exactly what a power cut mid-pwrite leaves behind.
 TEST_F(FileTest, FailAfterNWritesTearsTheFailingWrite) {
-    auto file = PosixFile::Open(FilePath("fault.db"), true).value();
+    test::FaultInjectionEnv env;
+    auto file = env.OpenFile(FilePath("fault.db"), true).value();
 
-    PosixFile::FailAfterNWrites(1);
+    env.FailAfterNWrites(1);
     const std::string first = "first-write";
-    ASSERT_TRUE(file.Write(0, first.data(), first.size()).has_value());
+    ASSERT_TRUE(file->Write(0, first.data(), first.size()).has_value());
 
     const std::string second = "second-write";
-    auto result = file.Write(100, second.data(), second.size());
+    auto result = file->Write(100, second.data(), second.size());
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().kind, FileError::Kind::IoError);
 
     // Further writes keep failing until the hook is cleared.
-    auto still_failing = file.Write(0, first.data(), first.size());
+    auto still_failing = file->Write(0, first.data(), first.size());
     EXPECT_FALSE(still_failing.has_value());
 
-    PosixFile::ClearWriteFailure();
+    env.ClearWriteFailure();
 
     // The failing write tore: exactly half its bytes reached the file.
-    EXPECT_EQ(file.Size().value(), 100 + second.size() / 2);
+    EXPECT_EQ(file->Size().value(), 100 + second.size() / 2);
 
     // Disarmed: writes work again.
-    EXPECT_TRUE(file.Write(0, first.data(), first.size()).has_value());
+    EXPECT_TRUE(file->Write(0, first.data(), first.size()).has_value());
 }
 
-TEST_F(FileTest, SyncIncrementsTotalSyncsCounter) {
-    auto file = PosixFile::Open(FilePath("sync.db"), true).value();
-    const uint64_t before = PosixFile::TotalSyncs();
-    ASSERT_TRUE(file.Sync().has_value());
-    EXPECT_EQ(PosixFile::TotalSyncs(), before + 1);
+// Faults are per Env: a file from the default Env is never affected.
+TEST_F(FileTest, FaultsDoNotLeakOutsideTheirEnv) {
+    test::FaultInjectionEnv env;
+    env.FailAfterNWrites(0);
+    auto plain = PosixFile::Open(FilePath("plain.db"), true).value();
+    const std::string data = "unaffected";
+    EXPECT_TRUE(plain.Write(0, data.data(), data.size()).has_value());
+}
+
+TEST_F(FileTest, SyncIncrementsEnvSyncCounter) {
+    test::FaultInjectionEnv env;
+    auto file = env.OpenFile(FilePath("sync.db"), true).value();
+    ASSERT_TRUE(file->Sync().has_value());
+    EXPECT_EQ(env.syncs(), 1u);
 }
 
 }  // namespace

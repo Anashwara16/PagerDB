@@ -1006,9 +1006,10 @@ Result<std::unique_ptr<DB>> DB::Open(const std::string& path, const Options& opt
     // Step 3: Open the data file
     // -------------------------------------------------------------------------
     auto data_file_path = (dir_path / "data.db").string();
-    
+    storage::Env* env = options.env != nullptr ? options.env : storage::Env::Default();
+
     auto pager_result = storage::Pager::Open(data_file_path, options.create_if_missing,
-                                             options.verify_checksums);
+                                             options.verify_checksums, env);
     if (!pager_result) [[unlikely]] {
         return std::unexpected(pager_result.error());
     }
@@ -1036,7 +1037,7 @@ Result<std::unique_ptr<DB>> DB::Open(const std::string& path, const Options& opt
         !records.empty() ? records.front().lsn
         : (pager.checkpoint_lsn() == kInvalidLsn ? kFirstLsn
                                                  : pager.checkpoint_lsn());
-    auto wal_writer_result = wal::LogWriter::Open(wal_path, base_lsn);
+    auto wal_writer_result = wal::LogWriter::Open(wal_path, base_lsn, env);
     if (!wal_writer_result) [[unlikely]] {
         return std::unexpected(wal_writer_result.error());
     }

@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "kvstore/db.h"
-#include "kvstore/storage/file.h"
+#include "fault_injection_env.h"
 
 namespace kvstore {
 namespace {
@@ -121,27 +121,31 @@ TEST_F(DbTest, ApproximateKeyCountTracksUniqueKeys) {
 // fsync at all. BPlusTree::Put used to call pager_.Sync() unconditionally,
 // taking the policy decision away from DbImpl.
 TEST_F(DbTest, NoSyncsWhenSyncOnWriteDisabled) {
+    test::FaultInjectionEnv env;  // Counts syncs; must outlive db
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = false;
     auto db = DB::Open(db_path_, options).value();
 
-    const uint64_t after_open = storage::PosixFile::TotalSyncs();
+    const uint64_t after_open = env.syncs();
     for (int i = 0; i < 20; ++i) {
         ASSERT_TRUE(db->Put("key" + std::to_string(i), "value").ok());
     }
-    EXPECT_EQ(storage::PosixFile::TotalSyncs(), after_open);
+    EXPECT_EQ(env.syncs(), after_open);
 }
 
 TEST_F(DbTest, SyncOnWriteIssuesSyncPerPut) {
+    test::FaultInjectionEnv env;  // Counts syncs; must outlive db
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;
     auto db = DB::Open(db_path_, options).value();
 
-    const uint64_t before = storage::PosixFile::TotalSyncs();
+    const uint64_t before = env.syncs();
     ASSERT_TRUE(db->Put("alpha", "one").ok());
-    EXPECT_GE(storage::PosixFile::TotalSyncs(), before + 1);
+    EXPECT_GE(env.syncs(), before + 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -169,28 +173,32 @@ TEST_F(DbTest, DeleteRemovesKeyAcrossReopen) {
 }
 
 TEST_F(DbTest, DeleteMissingKeyIsNotFoundAndDoesNotSync) {
+    test::FaultInjectionEnv env;  // Counts syncs; must outlive db
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;
     auto db = DB::Open(db_path_, options).value();
     ASSERT_TRUE(db->Put("alpha", "one").ok());
 
-    const uint64_t before = storage::PosixFile::TotalSyncs();
+    const uint64_t before = env.syncs();
     EXPECT_EQ(db->Delete("missing").code(), StatusCode::kNotFound);
     // Nothing changed on disk, so the failed delete must not fsync.
-    EXPECT_EQ(storage::PosixFile::TotalSyncs(), before);
+    EXPECT_EQ(env.syncs(), before);
 }
 
 TEST_F(DbTest, DeleteHonorsSyncOnWrite) {
+    test::FaultInjectionEnv env;  // Counts syncs; must outlive db
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = true;
     auto db = DB::Open(db_path_, options).value();
     ASSERT_TRUE(db->Put("alpha", "one").ok());
 
-    const uint64_t before = storage::PosixFile::TotalSyncs();
+    const uint64_t before = env.syncs();
     ASSERT_TRUE(db->Delete("alpha").ok());
-    EXPECT_GE(storage::PosixFile::TotalSyncs(), before + 1);
+    EXPECT_GE(env.syncs(), before + 1);
 }
 
 // Phase 3: repeated reads of the same keys must be served from the buffer

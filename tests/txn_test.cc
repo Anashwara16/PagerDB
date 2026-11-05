@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "kvstore/db.h"
-#include "kvstore/storage/file.h"
+#include "fault_injection_env.h"
 #include "kvstore/txn/lock_manager.h"
 
 namespace kvstore {
@@ -538,7 +538,9 @@ TEST_F(TxnTest, LockWaitTimesOutWhenHolderNeverReleases) {
 // transaction, so every other thread kept writing to a tree that may contain
 // a half-completed structural change.
 TEST_F(TxnTest, HalfAppliedTxnWriteFailurePoisonsTheDbHandle) {
+    test::FaultInjectionEnv env;  // Must outlive db
     Options options;
+    options.env = &env;
     options.create_if_missing = true;
     options.sync_on_write = false;   // No WAL flush per put
     options.max_wal_bytes = 0;       // No auto-checkpoint
@@ -558,14 +560,14 @@ TEST_F(TxnTest, HalfAppliedTxnWriteFailurePoisonsTheDbHandle) {
     ASSERT_TRUE(db->Sync().ok());
 
     auto txn = std::move(db->Begin().value());
-    storage::PosixFile::FailAfterNWrites(0);  // Next file write tears + fails
+    env.FailAfterNWrites(0);  // Next file write tears + fails
 
     // Keep writing until an eviction write-back fails inside tree_.Put.
     bool failed = false;
     for (int i = 0; i < 500 && !failed; ++i) {
         failed = !txn->Put("txn" + std::to_string(i), std::string(64, 'y')).ok();
     }
-    storage::PosixFile::ClearWriteFailure();
+    env.ClearWriteFailure();
     ASSERT_TRUE(failed) << "fault hook never fired - workload tuning drifted";
 
     // The failed transaction is spent...

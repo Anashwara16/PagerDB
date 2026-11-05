@@ -47,6 +47,7 @@
 #include <cstddef>      // size_t
 #include <cstdint>      // uint64_t
 #include <expected>     // std::expected (C++23)
+#include <memory>       // std::unique_ptr (Env::OpenFile)
 #include <string>
 #include <string_view>  // std::string_view
 #include <system_error> // std::error_code
@@ -98,6 +99,53 @@ using FileResult = std::expected<T, FileError>;
 using FileStatus = std::expected<void, FileError>;
 
 // ==============================================================================
+// File Interface
+// ==============================================================================
+//
+// The seam between the storage engine and the operating system. Pager and
+// LogWriter own a std::unique_ptr<File> rather than a concrete PosixFile, so
+// tests can substitute a decorator (see tests/fault_injection_env.h) that
+// counts syncs or tears writes, without any test code living in production.
+// See PosixFile below for the contract of each operation.
+//
+// The cost is one virtual call per I/O, which is noise next to the syscall.
+
+class File {
+public:
+    virtual ~File() = default;
+
+    [[nodiscard]] virtual FileStatus Read(uint64_t offset, void* buf,
+                                          size_t size) const = 0;
+    [[nodiscard]] virtual FileStatus Write(uint64_t offset, const void* buf,
+                                           size_t size) = 0;
+    [[nodiscard]] virtual FileStatus Sync() = 0;
+    [[nodiscard]] virtual FileStatus TryLockExclusive() = 0;
+    [[nodiscard]] virtual FileResult<uint64_t> Size() const = 0;
+    [[nodiscard]] virtual FileStatus Truncate(uint64_t size) = 0;
+    [[nodiscard]] virtual std::string_view path() const = 0;
+};
+
+// ==============================================================================
+// Env - File Factory
+// ==============================================================================
+//
+// How the engine opens files. Production uses Env::Default() (plain
+// PosixFiles); tests pass their own Env through Options::env to wrap every
+// file the database opens. The same pattern as LevelDB's / RocksDB's Env.
+
+class Env {
+public:
+    virtual ~Env() = default;
+
+    // Same semantics as PosixFile::Open.
+    [[nodiscard]] virtual FileResult<std::unique_ptr<File>> OpenFile(
+        std::string_view path, bool create_if_missing) = 0;
+
+    // Process-wide POSIX environment. Never null, never destroyed.
+    [[nodiscard]] static Env* Default();
+};
+
+// ==============================================================================
 // PosixFile Class
 // ==============================================================================
 //
@@ -120,7 +168,7 @@ using FileStatus = std::expected<void, FileError>;
 //   // Destroying a does nothing
 //   // Destroying b closes the file
 
-class PosixFile {
+class PosixFile final : public File {
 public:
     // -------------------------------------------------------------------------
     // Construction & Destruction
@@ -134,7 +182,7 @@ public:
 
     // Destructor - closes the file if open
     // This is the "R" (Resource release) in RAII
-    ~PosixFile();
+    ~PosixFile() override;
 
     // -------------------------------------------------------------------------
     // Static Factory Method
@@ -181,7 +229,8 @@ public:
     //
     // Note: Uses pread() which doesn't change the file's seek position.
     //       This is important for thread safety.
-    [[nodiscard]] FileStatus Read(uint64_t offset, void* buf, size_t size) const;
+    [[nodiscard]] FileStatus Read(uint64_t offset, void* buf,
+                                  size_t size) const override;
 
     // Write data to file at specified offset.
     //
@@ -197,7 +246,8 @@ public:
     //
     // Note: Uses pwrite() which doesn't change the file's seek position.
     //       Data may be buffered by the OS - call Sync() to force to disk.
-    [[nodiscard]] FileStatus Write(uint64_t offset, const void* buf, size_t size);
+    [[nodiscard]] FileStatus Write(uint64_t offset, const void* buf,
+                                   size_t size) override;
 
     // Force buffered data to disk.
     //
@@ -213,19 +263,7 @@ public:
     // Implementation uses fdatasync() which is slightly faster than fsync()
     // because it doesn't update file metadata (modification time, etc.)
     // unless necessary for data integrity.
-    [[nodiscard]] FileStatus Sync();
-
-    // Process-wide count of successful Sync() calls across all PosixFiles.
-    // Test hook for asserting sync policy (e.g. Options::sync_on_write=false
-    // must issue zero syncs); not meant for production decisions.
-    [[nodiscard]] static uint64_t TotalSyncs() noexcept;
-
-    // Test-only fault injection (Phase 4 crash tests): after `n` more
-    // successful writes, the next write persists only half its bytes and
-    // returns IoError (a torn write); subsequent writes keep failing until
-    // ClearWriteFailure(). Process-wide, like TotalSyncs.
-    static void FailAfterNWrites(int64_t n) noexcept;
-    static void ClearWriteFailure() noexcept;
+    [[nodiscard]] FileStatus Sync() override;
 
     // Try to take an exclusive advisory lock on the whole file (flock,
     // non-blocking). Returns FileError::Busy if another process (or another
@@ -235,7 +273,7 @@ public:
     // the PosixFile is closed/destroyed, and by the KERNEL if the process
     // dies - a crashed holder never leaves a stale lock behind. Advisory
     // only: it excludes other flock callers, not arbitrary writers.
-    [[nodiscard]] FileStatus TryLockExclusive();
+    [[nodiscard]] FileStatus TryLockExclusive() override;
 
     // Get the current size of the file in bytes.
     //
@@ -246,7 +284,7 @@ public:
     //
     // C++23 improvement: Returns the value directly instead of using
     // an output parameter. Much cleaner API!
-    [[nodiscard]] FileResult<uint64_t> Size() const;
+    [[nodiscard]] FileResult<uint64_t> Size() const override;
 
     // Truncate or extend the file to the specified size.
     //
@@ -260,7 +298,7 @@ public:
     //   std::expected<void, FileError>:
     //     - Has value (success) on success
     //     - Has error on failure
-    [[nodiscard]] FileStatus Truncate(uint64_t size);
+    [[nodiscard]] FileStatus Truncate(uint64_t size) override;
 
     // -------------------------------------------------------------------------
     // State Queries
@@ -270,7 +308,7 @@ public:
     [[nodiscard]] bool IsOpen() const { return fd_ >= 0; }
 
     // Get the file path (for debugging/logging)
-    [[nodiscard]] std::string_view path() const { return path_; }
+    [[nodiscard]] std::string_view path() const override { return path_; }
 
     // -------------------------------------------------------------------------
     // Move Operations

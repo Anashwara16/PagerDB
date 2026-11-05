@@ -49,9 +49,11 @@ public:
     // Open (creating if needed) the log at `path`. `base_lsn` is the LSN of
     // the file's first byte: meta.checkpoint_lsn for an empty log, or the
     // first record's stored LSN when reopening a non-empty one (recovery
-    // derives it). Existing bytes are treated as already flushed.
+    // derives it). Existing bytes are treated as already flushed. `env`
+    // opens the file (tests pass a fault-injecting Env).
     [[nodiscard("Open returns the writer")]]
-    static Result<LogWriter> Open(const std::string& path, Lsn base_lsn);
+    static Result<LogWriter> Open(const std::string& path, Lsn base_lsn,
+                                  storage::Env* env = storage::Env::Default());
 
     LogWriter(LogWriter&&) noexcept = default;
     LogWriter& operator=(LogWriter&&) noexcept = default;
@@ -128,7 +130,8 @@ public:
     }
 
 private:
-    LogWriter(storage::PosixFile file, Lsn base_lsn, uint64_t file_bytes)
+    LogWriter(std::unique_ptr<storage::File> file, Lsn base_lsn,
+              uint64_t file_bytes)
         : file_(std::move(file)),
           base_lsn_(base_lsn),
           end_lsn_(base_lsn + file_bytes),
@@ -143,7 +146,7 @@ private:
     // Write the buffer and fsync. Caller holds mu_.
     [[nodiscard]] Status FlushLocked();
 
-    storage::PosixFile file_;
+    std::unique_ptr<storage::File> file_;
     std::string buffer_;      // Appended but not yet written bytes
     Lsn base_lsn_ = kFirstLsn;
     Lsn end_lsn_ = kFirstLsn;

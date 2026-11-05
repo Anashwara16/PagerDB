@@ -25,7 +25,7 @@
 #include <vector>
 
 #include "kvstore/db.h"
-#include "kvstore/storage/file.h"
+#include "fault_injection_env.h"
 
 namespace kvstore {
 namespace {
@@ -35,7 +35,6 @@ namespace fs = std::filesystem;
 class RecoveryTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        storage::PosixFile::ClearWriteFailure();  // Hygiene from prior tests
         dir_ = fs::path(::testing::TempDir()) / "kvstore_recovery_test";
         std::error_code ec;
         fs::remove_all(dir_, ec);
@@ -43,7 +42,6 @@ protected:
     }
 
     void TearDown() override {
-        storage::PosixFile::ClearWriteFailure();
         std::error_code ec;
         fs::remove_all(dir_, ec);
     }
@@ -53,8 +51,9 @@ protected:
         return std::format("value-{:05d}-", i) + std::string(60, 'v');
     }
 
-    static Options CrashyOptions() {
+    Options CrashyOptions() {
         Options options;
+        options.env = &env_;            // Fault-injectable files
         options.create_if_missing = true;
         options.sync_on_write = true;   // Every op is committed when acked
         options.buffer_pool_frames = 8; // Small pool: constant dirty evictions
@@ -77,9 +76,9 @@ protected:
             EXPECT_TRUE(db->Delete(Key(i)).ok()) << Key(i);
             expected.erase(Key(i));
         }
-        storage::PosixFile::FailAfterNWrites(0);  // Crash: nothing lands anymore
+        env_.FailAfterNWrites(0);  // Crash: nothing lands anymore
         db.reset();                                // Shutdown checkpoint fails
-        storage::PosixFile::ClearWriteFailure();
+        env_.ClearWriteFailure();
         return expected;
     }
 
@@ -100,6 +99,7 @@ protected:
     }
 
     fs::path dir_;
+    test::FaultInjectionEnv env_;  // Fresh per test: no fault leaks between tests
 };
 
 TEST_F(RecoveryTest, CommittedOpsSurviveCrashWithoutShutdownCheckpoint) {
@@ -163,12 +163,13 @@ TEST_F(RecoveryTest, CrashDuringRecoveryIsItselfRecoverable) {
 
     Options options;
     options.create_if_missing = false;
+    options.env = &env_;
 
     // First recovery attempt dies partway through (writes start failing
     // after a handful succeed - mid-replay / mid-checkpoint).
-    storage::PosixFile::FailAfterNWrites(5);
+    env_.FailAfterNWrites(5);
     auto crashed_open = DB::Open(dir_.string(), options);
-    storage::PosixFile::ClearWriteFailure();
+    env_.ClearWriteFailure();
     ASSERT_FALSE(crashed_open.has_value())
         << "open was expected to fail mid-recovery";
 
@@ -219,7 +220,7 @@ TEST_F(RecoveryTest, CrashMidAllocationHeavySplitsRecoversConsistently) {
             auto db = DB::Open(dir.string(), CrashyOptions()).value();
             // Large values force frequent splits (and page allocations).
             const std::string big(700, 'b');
-            storage::PosixFile::FailAfterNWrites(fault_after);
+            env_.FailAfterNWrites(fault_after);
             for (int i = 0; i < 200; ++i) {
                 Status s = db->Put(Key(i), big);
                 if (!s.ok()) {
@@ -229,7 +230,7 @@ TEST_F(RecoveryTest, CrashMidAllocationHeavySplitsRecoversConsistently) {
             }
             // Keep failing through the destructor's checkpoint attempt.
             db.reset();
-            storage::PosixFile::ClearWriteFailure();
+            env_.ClearWriteFailure();
         }
 
         Options options;
