@@ -12,7 +12,7 @@
 #
 # Uses the kvstore_demo binary (built by any preset). sync_on_write is off in
 # the loader, so this demonstrates crash-CONSISTENCY (no corruption, clean
-# prefix), not per-write durability - see src/main.cc.
+# prefix), not per-write durability - see tools/kvstore_demo.cc.
 #
 set -euo pipefail
 

@@ -1,5 +1,5 @@
 // ==============================================================================
-// src/main.cc - kvstore_demo: smoke test + crash-demo workload (Phase 6)
+// tools/kvstore_demo.cc - kvstore_demo: smoke test + crash-demo workload (Phase 6)
 // ==============================================================================
 //
 //   kvstore_demo                     - original tiny smoke test in ./testdb

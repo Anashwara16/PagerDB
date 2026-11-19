@@ -138,7 +138,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 set(KVSTORE_SOURCES
     src/storage/file.cc
-    src/storage/page.cc
+    src/storage/page_format.cc
     src/storage/pager.cc
     src/storage/buffer_pool.cc
     src/btree/node.cc
@@ -149,12 +149,6 @@ set(KVSTORE_SOURCES
     src/wal/log_reader.cc
     src/txn/lock_manager.cc
     src/db.cc
-    # src/storage/buffer_pool.cc
-    # src/btree/btree.cc
-    # src/btree/node.cc
-    # src/wal/log_writer.cc
-    # src/wal/log_reader.cc
-    # src/db.cc
 )
 
 # ------------------------------------------------------------------------------
@@ -327,7 +321,7 @@ message(STATUS "")
 # Demo Executable (for manual testing)
 # ------------------------------------------------------------------------------
 # Named kvstore_demo so the kvstore_test name stays free for test binaries.
-add_executable(kvstore_demo src/main.cc)
+add_executable(kvstore_demo tools/kvstore_demo.cc)
 target_link_libraries(kvstore_demo kvstore_lib)
 
 # ------------------------------------------------------------------------------

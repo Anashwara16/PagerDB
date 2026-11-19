@@ -1,17 +1,13 @@
 // ==============================================================================
-// kvstore/storage/page.cc - Page Implementation (C++23)
+// src/storage/page_format.cc - Out-of-line parts of page_format.h (C++23)
 // ==============================================================================
 //
-// Most of the Page functionality is implemented inline in the header since
-// the methods are simple. This file exists for:
-//   1. More complex future operations (compaction, checksum calculation)
-//   2. Keeping the translation unit structure consistent
-//   3. Debugging utilities
-//
-// C++23 Features Used:
-// --------------------
-//   - std::bit_cast for safe type punning (in future implementations)
-//   - constexpr where applicable
+// Simple Page accessors live inline in the header. This file holds the rest:
+//   - CRC-32 (Crc32, Crc32WithZeroedField, Page::ComputeChecksum): hardware
+//     __crc32b/__crc32d on ARMv8 with CRC, portable slicing-by-8 otherwise
+//     (tables generated at compile time via constexpr)
+//   - Page::Compact()  - defragments the slotted page's free space
+//   - Page::Validate() / Page::Dump() - integrity check and debug printing
 //
 // ==============================================================================
 
@@ -32,40 +28,6 @@
 #endif
 
 namespace kvstore::storage {
-
-// ==============================================================================
-// Future Implementation Notes
-// ==============================================================================
-//
-// When you're ready to implement these features, add them here:
-//
-// 1. Page Compaction:
-//    Status Page::Compact() {
-//        // Move all valid records to end of page contiguously
-//        // Update slot offsets
-//        // Reclaim space from deleted records
-//        // Could use std::ranges for iteration
-//    }
-//
-// 2. Checksum Calculation (using CRC32):
-//    uint32_t Page::CalculateChecksum() const {
-//        // CRC32 of all bytes except the checksum field itself
-//        // Consider using std::bit_cast for safe byte access
-//    }
-//
-// 3. Debug Dump:
-//    void Page::Dump(std::ostream& out) const {
-//        // Print page contents in human-readable format
-//        // Use std::format (C++20/23) for formatting
-//    }
-//
-// 4. Page Validation:
-//    bool Page::Validate() const {
-//        // Verify internal consistency:
-//        //   - Slots don't overlap
-//        //   - free_space_start <= free_space_end
-//        //   - All slot offsets are within bounds
-//    }
 
 namespace {
 

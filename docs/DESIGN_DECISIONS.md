@@ -7,7 +7,7 @@ rationale — this is that document.
 
 ## Storage & integrity
 
-**Checksum: CRC-32, table already in page.cc.**
+**Checksum: CRC-32, table already in page_format.cc.**
 *Rationale:* good-enough corruption detection with zero new dependencies; the
 constexpr table predated Phase 1.
 *Outcome:* right call with one big footnote. Verification caught real bugs

@@ -610,7 +610,7 @@ static_assert(sizeof(Page) == kPageSize, "Page must be exactly kPageSize bytes")
 // CRC-32 (polynomial 0xEDB88320, init/final-xor 0xFFFFFFFF) over `len` bytes
 // of `data`, with the 4-byte field at `field_offset` treated as zero. Used for
 // both PageHeader::checksum and MetaPage::checksum so a stored checksum never
-// feeds into its own computation. Implemented in page.cc.
+// feeds into its own computation. Implemented in page_format.cc.
 
 [[nodiscard]] uint32_t Crc32WithZeroedField(const void* data, size_t len,
                                             size_t field_offset) noexcept;
