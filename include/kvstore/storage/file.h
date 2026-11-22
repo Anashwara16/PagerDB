@@ -24,7 +24,7 @@
 #include <memory>       // std::unique_ptr (Env::OpenFile)
 #include <string>
 #include <string_view>  // std::string_view
-#include <system_error> // std::error_code
+#include <utility>      // std::move
 
 namespace kvstore::storage {
 
