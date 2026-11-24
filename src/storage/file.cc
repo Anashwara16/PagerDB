@@ -7,9 +7,9 @@
 // Design notes:
 //   - Errors are returned as std::expected<T, FileError>; the I/O path does not
 //     throw. errno is captured at the failure site (see IoErrorFromErrno).
-//   - Transfers are all-or-nothing at the API boundary: short reads/writes are
-//     reported as IoError rather than retried, since callers operate on
-//     fixed-size page buffers.
+//   - Transfers must complete in full: short reads/writes are reported as
+//     IoError rather than retried, since callers operate on fixed-size page
+//     buffers. A failed Write() may still have modified part of the range.
 //   - Positioned I/O never touches the shared file offset, so concurrent
 //     Read() calls on one PosixFile require no external locking.
 //
@@ -17,7 +17,7 @@
 
 #include "kvstore/storage/file.h"
 
-#include <utility>      // move & std::exchange
+#include <utility>      // std::exchange, std::move
 #include <fcntl.h>      // open(), O_RDWR, O_CREAT, etc.
 #include <unistd.h>     // close(), pread(), pwrite(), fdatasync(), ftruncate()
 #include <sys/file.h>   // flock(), LOCK_EX, LOCK_NB
@@ -59,9 +59,9 @@ Env* Env::Default() {
 // Helper Function
 // ==============================================================================
 
-// Builds an IoError from the current errno. Must be invoked before any call
-// that may clobber errno. strerror() is not guaranteed thread-safe; acceptable
-// here because the message is diagnostic only.
+// Builds an IoError from the current errno; call before anything that can
+// clobber it. strerror() is not required to be thread-safe, which is tolerated
+// because the message is diagnostic only and never parsed.
 
 [[nodiscard]] static std::unexpected<FileError> IoErrorFromErrno(
     std::string_view context, 
@@ -81,7 +81,6 @@ PosixFile::~PosixFile() {
     // fd_ == -1 denotes a moved-from or already-closed file.
     if (fd_ >= 0) {
         ::close(fd_);
-        fd_= -1;
     }
 }
 
@@ -98,7 +97,6 @@ PosixFile::PosixFile(PosixFile&& other) noexcept
 PosixFile& PosixFile::operator=(PosixFile&& other) noexcept {
     // Self-move guard: the close below would otherwise discard the descriptor.
     if (this != &other) {
-        // Release the currently held descriptor before adopting other's.
         if (fd_ >= 0){
             ::close(fd_);
         }
@@ -116,7 +114,9 @@ PosixFile& PosixFile::operator=(PosixFile&& other) noexcept {
 
 FileResult<PosixFile> PosixFile::Open(std::string_view path, bool create_if_missing) {
     // O_RDWR: a single descriptor serves both page reads and writes.
-    int flags = O_RDWR;
+    // O_CLOEXEC: keep the descriptor, and the flock() held through it, from
+    // leaking into exec'd children.
+    int flags = O_RDWR | O_CLOEXEC;
 
     if (create_if_missing) {
         flags |= O_CREAT;
@@ -152,9 +152,6 @@ FileStatus PosixFile::Read(uint64_t offset, void* buf, size_t size) const {
         return std::unexpected(FileError::Internal("Read called on closed file"));
     }
 
-    // pread() leaves the shared file offset untouched, so concurrent readers need
-    // no external synchronization.
-    
     ssize_t bytes_read = ::pread(fd_, buf, size, static_cast<off_t>(offset));
     
     if (bytes_read < 0) {
@@ -211,11 +208,12 @@ FileStatus PosixFile::Sync() {
         return std::unexpected(FileError::Internal("Sync called on closed file"));
     }
 
-    // fdatasync() skips non-essential metadata (timestamps) but still persists
-    // size changes, avoiding the extra journal commit fsync() may incur.
-    
-    // macOS has no fdatasync(), and its fsync() does not flush the drive cache;
-    // F_FULLFSYNC is required for power-loss durability (Phase 4).
+    // fdatasync() skips metadata not needed to read the data back (timestamps)
+    // but still persists size changes, avoiding the extra journal commit fsync()
+    // may incur.
+
+    // macOS: fsync() only reaches the drive's volatile write cache, so this path
+    // is not power-loss durable. TODO(phase-4): use fcntl(F_FULLFSYNC).
 #if defined(__APPLE__)
     if (::fsync(fd_) < 0) {
         return IoErrorFromErrno("Sync failed", path_);
