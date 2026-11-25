@@ -144,6 +144,9 @@ public:
     // file size), skipping timestamps. This is the durability barrier for the
     // WAL and is the dominant latency on the write path, so callers batch
     // writes ahead of it.
+    //
+    // macOS: plain fsync(), which only reaches the drive's volatile cache, so
+    // Sync() is not yet power-loss durable there (see file.cc TODO).
     [[nodiscard]] FileStatus Sync() override;
 
     // Non-blocking exclusive flock on the whole file; Busy if held, including
